@@ -23,8 +23,10 @@ from tqdm import tqdm
 # -------------------------------------------------------------------------------------------
 #               >> Settings
 # -------------------------------------------------------------------------------------------
-setDrawPlot     = False
+# Save images with identified corners drawn 
 savePlot        = True
+# Enable input image scaling (scale factor below)
+enableScaling   = True
 
 #Define size of chessboard target.
 boardSize = (8,5)
@@ -56,6 +58,7 @@ inputFilePath       = "./01_calibration_images/"
 # List calibration images:
 images = glob.glob(inputFilePath+"*")
 
+# Function to remove all files in given folder:
 def cleanFolder(folderPath):
     files = glob.glob(folderPath+'*')
     for f in files:
@@ -72,11 +75,15 @@ for fname in tqdm(images):
     # Convert image to greyscale 
     gray        = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
     # Scale image 
-    width  = int(gray.shape[1] * scale_percent /100 )
-    height = int(gray.shape[0] * scale_percent /100 )
-    dsize = (width, height)
-    outputImage = cv.resize(gray, dsize)
-    outputColor = cv.resize(img, dsize)
+    if enableScaling:
+        width  = int(gray.shape[1] * scale_percent /100 )
+        height = int(gray.shape[0] * scale_percent /100 )
+        dsize = (width, height)
+        outputImage = cv.resize(gray, dsize)
+        outputColor = cv.resize(img, dsize)
+    else:
+        outputImage = gray
+        outputColor = img
 
     # Print status
     fileName    = fname.split("/")
@@ -98,13 +105,8 @@ for fname in tqdm(images):
         if savePlot:
             cv.drawChessboardCorners(outputColor, boardSize, corners2, ret)
             savePath = processedImagePath + fileName
-            print(savePath)
+            print("Result images saved to: "+savePath)
             cv.imwrite(savePath, outputColor)
-            # Draw and display the corners
-        if setDrawPlot:
-            cv.drawChessboardCorners(outputColor, boardSize, corners2, ret)
-            cv.imshow('img', outputColor)
-            cv.waitKey(500)
     else:
         print("")
         print(" >> ("+str(imageIndex)+")  No chessboard found.")

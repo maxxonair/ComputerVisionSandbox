@@ -5,3 +5,24 @@
 *.jpeg
 *.pgm
 
+./01_StereoVision/01_calibration_images/*.png
+./01_StereoVision/01_calibration_images/*.jpg
+./01_StereoVision/01_calibration_images/*.jpeg
+
+./01_StereoVision/02_processed_calibration_images/*.png
+./01_StereoVision/02_processed_calibration_images/*.jpg
+./01_StereoVision/02_processed_calibration_images/*.jpeg
+
+./01_StereoVision/dump/
+
+./02_ConvertToGrey/*.png
+./02_ConvertToGrey/*.jpg
+./02_ConvertToGrey/*.jpeg
+
+./03_ResizeImages/01_ImagesToScale/*.png
+./03_ResizeImages/01_ImagesToScale/*.jpg
+./03_ResizeImages/01_ImagesToScale/*.jpe
+
+./03_ResizeImages/02_ScaledImages/*.png
+./03_ResizeImages/02_ScaledImages/*.jpg
+./03_ResizeImages/02_ScaledImages/*.jpeg
