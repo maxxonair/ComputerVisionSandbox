@@ -20,6 +20,7 @@ import os
 import cv2 as cv
 import glob
 from tqdm import tqdm
+from supportFunctions import cleanFolder
 # -------------------------------------------------------------------------------------------
 #               >> Settings
 # -------------------------------------------------------------------------------------------
@@ -27,6 +28,8 @@ from tqdm import tqdm
 savePlot        = True
 # Enable input image scaling (scale factor below)
 enableScaling   = True
+# Enable compute reprojection error:
+computeReprojectionError = True
 
 #Define size of chessboard target.
 boardSize = (8,5)
@@ -57,12 +60,6 @@ inputFilePath       = "./01_calibration_images/"
 
 # List calibration images:
 images = glob.glob(inputFilePath+"*")
-
-# Function to remove all files in given folder:
-def cleanFolder(folderPath):
-    files = glob.glob(folderPath+'*')
-    for f in files:
-        os.remove(f)
 
 # Empty folder for processed images 
 cleanFolder(processedImagePath)
@@ -114,7 +111,7 @@ for fname in tqdm(images):
     imageIndex = imageIndex + 1
 
 print(str(successCounter) + " Images processed. "+str(successCounter/imageIndex * 100)+" percent. ")           
-#cv.destroyAllWindows()   
+
 
 if isSuccess:
     # Create camera calibration parameters 
@@ -125,6 +122,15 @@ if isSuccess:
     np.save(parameterFilePath+"dist", dist)
     np.save(parameterFilePath+"rvecs", rvecs)
     np.save(parameterFilePath+"tvecs", tvecs)
+
+    mean_error = 0
+    if computeReprojectionError:
+        for i in range(len(objpoints)):
+            imgpoints2, _ = cv.projectPoints(objpoints[i], rvecs[i], tvecs[i], mtx, dist)
+            error = cv.norm(imgpoints[i], imgpoints2, cv.NORM_L2)/len(imgpoints2)
+            mean_error += error
+        print( "Total reprojection error: {}".format(mean_error/len(objpoints)) )
+
     print("")
     print(' >>> Camera parameters saved succesfully!)')
     print("")
