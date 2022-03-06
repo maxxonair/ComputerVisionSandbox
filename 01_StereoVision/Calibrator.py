@@ -38,7 +38,7 @@ class Calibrator:
     sRecifiedImgPath        = ''
     
     # Process images at scale: 
-    scale_percent   = 35
+    scale_percent   = 100
     
     # Chessboard pattern dimension
     boardSize       = (0,0)
