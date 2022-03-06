@@ -19,7 +19,7 @@ useRemapping = True
 # Set file paths: 
 parameterFilePath   = "./03_camera_parameters/"
 resultFilePath      = "./05_corrected_images/"
-inputFilePath       = "./01_calibration_images/"
+inputFilePath       = "./06_scaled_images/"
 
 ret     = np.load(parameterFilePath+"ret.npy")
 mtx     = np.load(parameterFilePath+"K.npy")
@@ -63,7 +63,7 @@ for fname in tqdm(images):
     fileName    = fileName[-1]
     fileName    = fileName.split(".")
     fileName    = fileName[0]
-    print("")
-    print('Save Result file : ' + fileName)
+    #print("")
+    #print('Save Result file : ' + fileName)
     cv.imwrite(resultFilePath+fileName+".png", dst)
 
