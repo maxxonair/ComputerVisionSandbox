@@ -1,0 +1,10 @@
+
+
+# Ignore everything 
+*
+
+# Except
+!.gitignore
+!./util/*.py
+!runVisualOdometryTest.py
+

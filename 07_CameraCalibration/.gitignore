@@ -1,0 +1,12 @@
+
+
+# Ignore everything 
+*
+
+# Except
+!.gitignore
+!./util/*
+!imageCaptureDualCam.py
+!imageCaptureSingleCam.py
+!runCalibration.py
+
