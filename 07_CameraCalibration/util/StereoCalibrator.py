@@ -387,6 +387,9 @@ class StereoCalibrator:
             self.LeftCamera.setStereoCalibrated()
             self.RightCamera.setStereoCalibrated()
             
+            # Calculate reprojection erro statistics 
+            self._showReprojectionError()
+            
             # Save calibration results to file 
             self._saveResults()
             
@@ -490,68 +493,57 @@ class StereoCalibrator:
         CalibCritera = (cv.TERM_CRITERIA_EPS +
             cv.TERM_CRITERIA_MAX_ITER, 300, 1e-6)
         
-        if self.bFlagCalibrationComplete:
-            # Create Image and Object Point array from imageData
-            self._createImageAndObjectPointArray()
+        # Create Image and Object Point array from imageData
+        self._createImageAndObjectPointArray()
+        
+        self.log.pLogMsg(' ')
+        self.log.pLogMsg(' [MONO CALIBRATE] ==> [LEFT CAM]')
+        self.log.pLogMsg(' ')
+        
+        # Create camera calibration parameters
+        (   left_success,
+            self.LeftCamera.Kmat,
+            self.LeftCamera.Dvec,
+            self.LeftCamera.rvec,
+            self.LeftCamera.tvec
+        ) = cv.calibrateCamera( self.objpoints,
+                                self.leftImgpoints,
+                                self.imageSize,
+                                None,
+                                None,
+                                criteria=CalibCritera)
             
-            self.log.pLogMsg(' ')
-            self.log.pLogMsg(' [MONO CALIBRATE] ==> [LEFT CAM]')
-            self.log.pLogMsg(' ')
+        (   right_success,
+            self.RightCamera.Kmat,
+            self.RightCamera.Dvec,
+            self.RightCamera.rvec,
+            self.RightCamera.tvec 
+        ) = cv.calibrateCamera( self.objpoints,
+                                self.rightImgpoints,
+                                self.imageSize,
+                                None,
+                                None,
+                                criteria=CalibCritera)
             
-            # Create camera calibration parameters
-            (   left_success,
-                self.LeftCamera.Kmat,
-                self.LeftCamera.Dvec,
-                self.LeftCamera.rvec,
-                self.LeftCamera.tvec
-            ) = cv.calibrateCamera( self.objpoints,
-                                    self.leftImgpoints,
-                                    self.imageSize,
-                                    None,
-                                    None,
-                                    criteria=CalibCritera)
-                
-            (   right_success,
-                self.RightCamera.Kmat,
-                self.RightCamera.Dvec,
-                self.RightCamera.rvec,
-                self.RightCamera.tvec 
-            ) = cv.calibrateCamera( self.objpoints,
-                                    self.rightImgpoints,
-                                    self.imageSize,
-                                    None,
-                                    None,
-                                    criteria=CalibCritera)
-                
-            # Distribute rvecs and tvecs to the respective imageData's
-            for ii, index in enumerate( self.aImageListToObjPointList) :
-                self.aImageList[index].left_rvec  = self.LeftCamera.rvec[ii]
-                self.aImageList[index].left_tvec  = self.LeftCamera.tvec[ii]
-                self.aImageList[index].right_rvec = self.RightCamera.rvec[ii]
-                self.aImageList[index].right_tvec = self.RightCamera.tvec[ii]
-                        
-            # Log success
-            self.log.pLogMsg("")
-            self.log.pLogMsg('Mono Camera calibration finished.')
-            self.log.pLogMsg("")
-            self.log.pLogMsg("[LEFT  CAM] Intrinsic Matrix: "+str(self.LeftCamera.Kmat))
-            self.log.pLogMsg("")
-            self.log.pLogMsg("[LEFT  CAM] Distortion Coefficients: "+str(self.LeftCamera.Dvec))
-            self.log.pLogMsg("")
-            self.log.pLogMsg("[RIGHT CAM] Intrinsic Matrix: "+str(self.RightCamera.Kmat))
-            self.log.pLogMsg("")
-            self.log.pLogMsg("[RIGHT CAM] Distortion Coefficients: "+str(self.RightCamera.Dvec))
-            self.log.pLogMsg("")
-            # Calculate reprojection error
-            # self._calculateTotalReprojError()
-            # self.log.pLogMsg(' ')
-            # self.log.pLogMsg("Total reprojection error: " +
-            #                 str(self.totalReprojectionError))
-        else:
-            self.log.pLogMsg("")
-            self.log.pLogErr('Calibration failed (No chessboard found)')
-            self.log.pLogMsg("")
-    
+        # Distribute rvecs and tvecs to the respective imageData's
+        for ii, index in enumerate( self.aImageListToObjPointList) :
+            self.aImageList[index].left_rvec  = self.LeftCamera.rvec[ii]
+            self.aImageList[index].left_tvec  = self.LeftCamera.tvec[ii]
+            self.aImageList[index].right_rvec = self.RightCamera.rvec[ii]
+            self.aImageList[index].right_tvec = self.RightCamera.tvec[ii]
+                    
+        # Log success
+        self.log.pLogMsg("")
+        self.log.pLogMsg('Mono Camera calibration finished.')
+        self.log.pLogMsg("")
+        self.log.pLogMsg("[LEFT  CAM] Intrinsic Matrix: "+str(self.LeftCamera.Kmat))
+        self.log.pLogMsg("")
+        self.log.pLogMsg("[LEFT  CAM] Distortion Coefficients: "+str(self.LeftCamera.Dvec))
+        self.log.pLogMsg("")
+        self.log.pLogMsg("[RIGHT CAM] Intrinsic Matrix: "+str(self.RightCamera.Kmat))
+        self.log.pLogMsg("")
+        self.log.pLogMsg("[RIGHT CAM] Distortion Coefficients: "+str(self.RightCamera.Dvec))
+        self.log.pLogMsg("")
       
     def _createAcircleObjectPoints(self):
         xx = 0
@@ -693,3 +685,111 @@ class StereoCalibrator:
         filteredImg = np.uint8(filteredImg)
 
         return filteredImg
+    
+    def _calculateTotalReprojErrorPerImage(self):
+        for ii, imageData in enumerate( self.aImageList ):
+            if imageData.isPatternFound == True:
+                imgpoints2_left, _ = cv.projectPoints(   self.objp,
+                                                        imageData.left_rvec,
+                                                        imageData.left_tvec,
+                                                        self.stereoCalibData.K1,
+                                                        self.stereoCalibData.D1)
+                
+                imgpoints2_right, _ = cv.projectPoints(   self.objp,
+                                                        imageData.right_rvec,
+                                                        imageData.right_tvec,
+                                                        self.stereoCalibData.K2,
+                                                        self.stereoCalibData.D2)
+                error_left = cv.norm(imageData.leftImagePoints,
+                                imgpoints2_left,
+                                cv.NORM_L2)/len(imgpoints2_left)
+                
+                error_right = cv.norm(imageData.rightImagePoints,
+                                imgpoints2_right,
+                                cv.NORM_L2)/len(imgpoints2_right)
+                
+                reprojErrorArray_left  = np.absolute( np.array(imageData.leftImagePoints) - np.array(imgpoints2_left) )
+                reprojErrorArray_right = np.absolute( np.array(imageData.rightImagePoints) - np.array(imgpoints2_right) )
+                
+                maxErrorPerImage  = np.max( np.array( reprojErrorArray_left  ) )
+                minErrorPerImage  = np.min( np.array( reprojErrorArray_left ) )
+                sdtvErrorPerImage = np.std( np.array(reprojErrorArray_left) )
+                
+                self.aImageList[ii].reprojErrorArray        = reprojErrorArray_left
+                self.aImageList[ii].averageReprojError_left = error_left
+                self.aImageList[ii].maxReprojError_left     = maxErrorPerImage
+                self.aImageList[ii].minReprojError_left     = minErrorPerImage
+                self.aImageList[ii].stdReprojError_left     = sdtvErrorPerImage
+                
+                maxErrorPerImage  = np.max( np.array( reprojErrorArray_right  ) )
+                minErrorPerImage  = np.min( np.array( reprojErrorArray_right ) )
+                sdtvErrorPerImage = np.std( np.array(reprojErrorArray_right) )
+                
+                self.aImageList[ii].reprojErrorArray         = reprojErrorArray_right
+                self.aImageList[ii].averageReprojError_right = error_right
+                self.aImageList[ii].maxReprojError_left      = maxErrorPerImage
+                self.aImageList[ii].minReprojError_left      = minErrorPerImage
+                self.aImageList[ii].stdReprojError_left      = sdtvErrorPerImage
+
+    # Function create terminal print out with average reprojection error per valid calibration image
+    def _showReprojectionError(self):
+        self.log.pLogMsg("Reprojection error per image:")
+        self._calculateTotalReprojErrorPerImage()
+        aListReprojError_left   = self._returnAveragReprojErrPerImage("left")
+        aListReprojError_right  = self._returnAveragReprojErrPerImage("right")
+        maxAverageError_left  = max( aListReprojError_left )
+        maxAverageError_right = max( aListReprojError_right )
+        for imageData in self.aImageList:
+            if imageData.isPatternFound == True:
+                percReprojError_left  = imageData.averageReprojError_left  / maxAverageError_left  * 100 
+                percReprojError_right = imageData.averageReprojError_right / maxAverageError_right * 100 
+                
+                sBarString_left  = self._calculateReprojBarString(percReprojError_left)
+                sBarString_right = self._calculateReprojBarString(percReprojError_right)
+                
+                self.log.pLogMsg('#{:5.0f}'.format(imageData.imageIndex) + " [LEFT]  " + sBarString_left 
+                                 +' - average: '+'{:.5f}'.format(imageData.averageReprojError_left)
+                                 +' , min  '+'{:.5f}'.format(imageData.minReprojError_left)
+                                 +' , max  '+'{:.5f}'.format(imageData.maxReprojError_left)
+                                 +' , std  '+'{:.5f}'.format(imageData.stdReprojError_left)
+                                )
+                
+                self.log.pLogMsg('#{:5.0f}'.format(imageData.imageIndex) + " [RIGHT] " + sBarString_right 
+                                 +' - average: '+'{:.5f}'.format(imageData.averageReprojError_right)
+                                 +' , min  '+'{:.5f}'.format(imageData.minReprojError_right)
+                                 +' , max  '+'{:.5f}'.format(imageData.maxReprojError_right)
+                                 +' , std  '+'{:.5f}'.format(imageData.stdReprojError_right)
+                                )
+    # Function to create string to visualize reprojection error 
+    # e.g. |======    |
+    #      |==        |
+    def _calculateReprojBarString(self, percReprojError):
+        # Init Bar with divider
+        sBarString = "|"
+        # Define max length of the bar
+        # Equals number of characters that define 100 percent 
+        barLength=50
+        # calculate bar threshold in barLength space
+        nrBars = round( (percReprojError / 100 ) * barLength)
+        for ii in range(barLength):
+            if ii < nrBars:
+                # If within range add marker 
+                sBarString = sBarString + "="
+            else:
+                # If outside range add space
+                sBarString = sBarString + " "
+        # Finish bar string with end divider
+        sBarString = sBarString + "|"
+        return sBarString
+    
+    # Functions returns a list of average reprojection error per image - only for
+    # the valid images!   
+    def _returnAveragReprojErrPerImage(self, camera):
+        averageReprojList = []
+        for imageData in self.aImageList:
+            if imageData.isPatternFound == True:
+                if camera is "left":   
+                    averageReprojList.append(imageData.averageReprojError_left)
+                else:
+                    averageReprojList.append(imageData.averageReprojError_right)
+        return averageReprojList

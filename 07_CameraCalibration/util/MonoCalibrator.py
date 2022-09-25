@@ -7,7 +7,6 @@ Created on Sat Mar  5 20:43:57 2022
 """
 import cv2 as cv
 from tqdm import tqdm
-import yaml
 import glob
 import numpy as np
 
