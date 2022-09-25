@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+
 class CameraData():
     
     # Camera Name 
@@ -12,28 +13,18 @@ class CameraData():
     # Image size [ width , height ] [px]
     imgSize = []
     
+    rvec = []
+    tvec = []
+    
     
     # Max Reprojection Error per image [px]
     maxReprojError = 0
     # Array of reprojection error per calibration image [px]
     aReprojErrors = []
-    # 
-    
-    # Stereo calibration intrinsic matrix 
-    stereoKmat = []
-    # Stereo calibration distortion coefficients
-    stereoDvec = []
-    
-    # Stereo calibration projection matrix 
-    stereoPmat = []
-    # Stereo calibration rotation matrix 
-    stereoRmat = []
-    # Stereo calibraiton translation vector
-    stereoTvec = []
     
     # >> Internal status flags
     # Flag: Mono camera calibration completed 
-    isMonoCalibrationCompleted = False 
+    isMonoCalibrationCompleted   = False 
     # Flag: Stereo camera calibration completed
     isStereoCalibrationCompleted = False
     

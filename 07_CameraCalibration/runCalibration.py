@@ -24,13 +24,17 @@ import math
 
 from util.supportFunctions import cleanFolder
 from util.PyLog import PyLog
-from util.Calibrator import Calibrator
+from util.MonoCalibrator import MonoCalibrator
+from util.StereoCalibrator import StereoCalibrator
 
 def main():
     # -----------------------------------------------------------------------------
     #               >> Folder Setup
     # -----------------------------------------------------------------------------
     camera_ID    = "01"
+    # Mono test set 
+    # raw_img_path = "./_camera_01_calibration/2022_44_28_Aug_08_1661683472_frame_capture/"
+    # Stereo set 
     raw_img_path = "./_camera_01_calibration/2022_44_28_Aug_08_1661683472_frame_capture/"
 
     # >> Setup folder structure 
@@ -47,11 +51,13 @@ def main():
     inputFilePath       = raw_img_path # path + "/01_calibration_images/"
     scaledImgPath       = path + "/06_scaled_images/"
     sRecifiedImgPath    = path + '/05_corrected_images/'
+    sDisparityMapsPath  = path + '/07_disparity_map/'
 
     os.mkdir(parameterFilePath)
     os.mkdir(processedImagePath)
     os.mkdir(scaledImgPath)
     os.mkdir(sRecifiedImgPath)
+    os.mkdir(sDisparityMapsPath)
     # -----------------------------------------------------------------------------
     #               >> Settings
     # -----------------------------------------------------------------------------
@@ -61,6 +67,10 @@ def main():
     enableSaveScaledImgs     = False
     # Enable input image scaling (scale factor below)
     enableScaling            = False
+    # Calibration mode 
+    # mono   -> monocular calibration on single camera image
+    # stereo -> stereo calibration on dual camera images
+    calibrationMode = "stereo" 
     #=================================================================
     # Define calibration board
     #=================================================================
@@ -73,7 +83,7 @@ def main():
     # Factor to calculate between diagonal distance between dots and vertical distance
     # between dots of the same column
     acircleFactor = math.sqrt(2)
-    # Physical distance between pattern feater points [m]
+    # Physical distance between pattern feature points [m]
     # > chessboard     -> horizontal/vertical spacing between corners
     # > assym. circles -> diagonal spacing between dots
     phys_corner_dist = 0.04 * acircleFactor
@@ -97,86 +107,106 @@ def main():
     # Empty folder for scaled images:
     cleanFolder(scaledImgPath)
     #------------------------------------------------------------------------------
-    # >> Calibrate [monocular]
+    # >> Calibrate [MONOCULAR]
     #------------------------------------------------------------------------------
-    # Initialize calibration
-    calibrator = Calibrator(inputFilePath, 
-                            processedImagePath,
-                            scaledImgPath,
-                            parameterFilePath,
-                            sRecifiedImgPath,
-                            boardSize,
-                            phys_corner_dist,
-                            sPatternType,
-                            log)
+    if calibrationMode is "mono":
+        # Initialize calibration
+        calibrator = MonoCalibrator(inputFilePath, 
+                                processedImagePath,
+                                scaledImgPath,
+                                parameterFilePath,
+                                sRecifiedImgPath,
+                                boardSize,
+                                phys_corner_dist,
+                                sPatternType,
+                                log)
 
-    # Settings flags:
-    calibrator.setEnableImgScaling(enableScaling)
-    calibrator.setEnableMarkedImages(True)
-    calibrator.setEnableSaveScaledImages(enableSaveScaledImgs)
-    calibrator.setEnableRemapping(True)
-    calibrator.setCropRectifiedImages(True)
+        # Settings flags:
+        calibrator.setEnableImgScaling(enableScaling)
+        calibrator.setEnableMarkedImages(True)
+        calibrator.setEnableSaveScaledImages(enableSaveScaledImgs)
+        calibrator.setEnableRemapping(True)
+        calibrator.setCropRectifiedImages(True)
 
-    # Run [MONOCULAR CALIBRATION]
-    calibrator.calibrate()
+        # Run [MONOCULAR CALIBRATION]
+        calibrator.calibrate()
 
-    # Calculate reprojection error per image
-    calibrator.showReprojectionError()
-    
-    # Maximum allowable average reprojection error per image
-    maxReprojThreshold = 0.013
-    # Counter to track number of recalibration loops
-    counter = 0
-    # Maximum recalibration attempts to get the error down
-    maxIter = 3
-    # maximum average reprojection error per image in data set 
-    maxError = 999
-    
-    while maxError > maxReprojThreshold and counter < maxIter :
-        # Sort out outliers based on average recalibration error per image
-        nrImagesDiscarded = calibrator.discardReprojectionOutliers(maxReprojThreshold)
-        
-        # If no images were discarded break the loop and stop recalibration
-        if nrImagesDiscarded == 0:
-            break
-        
-        # Recalibrate based on the revised image list 
-        calibrator.recalibrate()
-        
         # Calculate reprojection error per image
         calibrator.showReprojectionError()
         
-        # Get maximum average recalibration error based on the recalibrated set
-        listReprojError = calibrator.returnAveragReprojErrPerImage()
-        maxError = max( listReprojError )
+        # Maximum allowable average reprojection error per image
+        maxReprojThreshold = 0.013
+        # Counter to track number of recalibration loops
+        counter = 0
+        # Maximum recalibration attempts to get the error down
+        maxIter = 3
+        # maximum average reprojection error per image in data set 
+        maxError = 999
         
-        # Update counter 
-        counter = counter + 1
+        while maxError > maxReprojThreshold and counter < maxIter :
+            # Sort out outliers based on average recalibration error per image
+            nrImagesDiscarded = calibrator.discardReprojectionOutliers(maxReprojThreshold)
+            
+            # If no images were discarded break the loop and stop recalibration
+            if nrImagesDiscarded == 0:
+                break
+            
+            # Recalibrate based on the revised image list 
+            calibrator.recalibrate()
+            
+            # Calculate reprojection error per image
+            calibrator.showReprojectionError()
+            
+            # Get maximum average recalibration error based on the recalibrated set
+            listReprojError = calibrator.returnAveragReprojErrPerImage()
+            maxError = max( listReprojError )
+            
+            # Update counter 
+            counter = counter + 1
 
-    # Save Calibration Results:
-    calibrator.saveResults()
+        # Save Calibration Results:
+        calibrator.saveResults()
 
-    # Produce rectified images
-    calibrator.rectify()
+        # Produce rectified images
+        calibrator.rectify()
 
     #------------------------------------------------------------------------------
-    # >> Calibrate [stereo]
+    # >> Calibrate [STEREO]
     #------------------------------------------------------------------------------
-    # StereoImagePairDir = ""
+    if calibrationMode is "stereo":
+        # Stereo set 
+        raw_img_path = "./_camera_01_02_stereo_calibration/2022_22_23_Sep_09_1663953735_frame_capture/"
+        inputFilePath = raw_img_path
+        # Initialize calibration
+        calibrator = StereoCalibrator(  inputFilePath, 
+                                        processedImagePath,
+                                        scaledImgPath,
+                                        parameterFilePath,
+                                        sRecifiedImgPath,
+                                        sDisparityMapsPath,
+                                        boardSize,
+                                        phys_corner_dist,
+                                        sPatternType,
+                                        log)
 
-    # RightCameraIdentifier = "right"
-    # LeftCameraIdentifier  = "left"
+        # Settings flags:
+        calibrator.setEnableImgScaling(enableScaling)
+        calibrator.setEnableMarkedImages(True)
+        calibrator.setEnableSaveScaledImages(enableSaveScaledImgs)
+        calibrator.setEnableRemapping(True)
+        # This setting does not work with rectifyCalibImages 
+        # -> (concat differently sized images ...)
+        calibrator.setCropRectifiedImages(False)
+        calibrator.setEnableUseBlobDetector(True)
+        
+        # Run >> read stereo pairs + [MONOCULAR CALIBRATION]
+        calibrator.readStereoPairs()
 
-    # imageFileExt          = "png"
+        calibrator.stereoCalibrate()
+        
+        # Rectify calibration image set and create disparity maps ()
+        # calibrator.rectifyCalibImages()
 
-    # calibrator.intializeStereoCalibration(StereoImagePairDir, 
-    #                                       RightCameraIdentifier, 
-    #                                       LeftCameraIdentifier, 
-    #                                       imageFileExt)
-
-    # calibrator.readImagePairs()
-
-    # calibrator.stereoCalibrate()
     #------------------------------------------------------------------------------ 
     log.close()
     #------------------------------------------------------------------------------ 

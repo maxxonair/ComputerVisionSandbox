@@ -15,7 +15,7 @@ from util.CameraMetaData import CameraData
 from util.CalibImageData import CalibImageData
 
 
-class Calibrator:
+class MonoCalibrator:
     # --------------------------------------------------------------------------
     # Set global variables
     # --------------------------------------------------------------------------
@@ -31,14 +31,14 @@ class Calibrator:
     bFlagEnableImgScaling = False
     bFlagSaveMarkedImages = False
     bFlagSaveScaledImages = False
-    bFlagUseRemapping = False
+    bFlagUseRemapping     = False
 
     # File Paths
-    sInputFilePath = ''
+    sInputFilePath      = ''
     sProcessedImagePath = ''
-    sScaledImgPath = ''
-    sParameterFilePath = ''
-    sRecifiedImgPath = ''
+    sScaledImgPath      = ''
+    sParameterFilePath  = ''
+    sRecifiedImgPath    = ''
 
     # Process images at scale:
     scale_percent = 100
@@ -108,31 +108,31 @@ class Calibrator:
                  sParameterFilePath, sRecifiedImgPath, boardSize, objectSize,
                  sPatternType, log):
         self.log = log
-        self.sInputFilePath = sInputFilePath
-        self.sProcessedImagePath = sProcessedImagePath
-        self.sScaledImgPath = sScaledImgPath
-        self.sParameterFilePath = sParameterFilePath
-        self.sRecifiedImgPath = sRecifiedImgPath
-        self.sPatternType = sPatternType
+        self.sInputFilePath         = sInputFilePath
+        self.sProcessedImagePath    = sProcessedImagePath
+        self.sScaledImgPath         = sScaledImgPath
+        self.sParameterFilePath     = sParameterFilePath
+        self.sRecifiedImgPath       = sRecifiedImgPath
+        self.sPatternType           = sPatternType
 
-        self.boardSize = boardSize
+        self.boardSize              = boardSize
         
-        self.objectSize = objectSize
+        self.objectSize             = objectSize
 
-        self.aStereoImagePairs = []
+        self.aStereoImagePairs      = []
 
         self.LeftCamera  = CameraData("Left_Camera")
         self.RightCamera = CameraData("Right_Camera")
 
         # Prepare object points
         if self.sPatternType == "acircles":
-            self.createAcircleObjectPoints()
+            self._createAcircleObjectPoints()
         elif self.sPatternType == "chessboard":
-            self.createChessboardObjectPoints()
+            self._createChessboardObjectPoints()
         else:
             self.pLogErr("Calibration board pattern type not valid!")
         
-    def createAcircleObjectPoints(self):
+    def _createAcircleObjectPoints(self):
         xx = 0
         yy = 0
         zz = 0
@@ -155,7 +155,7 @@ class Calibrator:
                 
         TBD=True
         
-    def createChessboardObjectPoints(self):
+    def _createChessboardObjectPoints(self):
         self.objp = np.zeros((self.boardSize[1]*self.boardSize[0], 3), np.float32)
         self.objp[:, :2] = np.mgrid[0:self.boardSize[0],
                             0:self.boardSize[1]].T.reshape(-1, 2) * self.objectSize
@@ -487,23 +487,6 @@ class Calibrator:
             if imageData.isPatternFound == True:
                 averageReprojList.append(imageData.averageReprojError)
         return averageReprojList
-
-    # Function: Save calibration parameters to yaml file
-    # def saveResults(self):
-    #     if self.bFlagCalibrationComplete:
-    #         # Compile data structure
-    #         data = {'camera_matrix': np.asarray(self.aKmat).tolist(),
-    #                 'dist_coeff': np.asarray(self.aDist).tolist()}
-    #         with open(self.sParameterFilePath+"calibration.yaml", "w") as f:
-    #             yaml.dump(data, f)
-
-    #         self.log.pLogMsg('Save calibration results to file.')
-
-    #     else:
-    #         self.log.pLogMsg("")
-    #         self.log.pLogErr('Calibration has not been completed. \
-    #                          Run calibration first')
-    #         self.log.pLogMsg("")
             
     def saveResults(self):
         fileStorage = cv.FileStorage()
@@ -611,253 +594,4 @@ class Calibrator:
                 iIndex = iIndex + 1
         else:
             self.log.pLogErr('Rectification aborted. No calibration data.')
-    # --------------------------------------------------------------------------
-    # >> Stereo Calibration
-    # --------------------------------------------------------------------------
-
-    def intializeStereoCalibration(self, StereoImagePairDir, RightCameraIdentifier, LeftCameraIdentifier, imageFileExt):
-        self.RightCameraIdentifier = RightCameraIdentifier
-        self.LeftCameraIdentifier = LeftCameraIdentifier
-        self.imageFileExt = imageFileExt
-
-        self.StereoImagePairDir = StereoImagePairDir
-
-        self.LeftCamera.imgPoints = []
-        self.RightCamera.imgPoints = []
-
-        # Reset elimination list
-        self.ImageEliminationList = []
-
-        # Reset Object points
-        objpoints = []
-
-    def readImagePairs(self):
-        # TODO: Add function to read image pairs
-        self.log.pLogMsg("")
-        self.log.pLogMsg("[READ IMAGE PAIRS]")
-        self.log.pLogMsg("")
-
-        self.LeftCameraImages = glob.glob(self.StereoImagePairDir +
-                                          self.LeftCameraIdentifier +
-                                          self.imageFileExt)
-        self.RightCameraImages = glob.glob(self.StereoImagePairDir +
-                                           self.RightCameraIdentifier +
-                                           self.imageFileExt)
-
-        # Check that number of images on left and right side matches
-        if len(self.LeftCameraImages) != len(self.RightCameraImages):
-            self.log.pLogErr(
-                "Unequal number of left and right images. Aborting ... ")
-            return False
-
-        self.LeftCameraImages.sort()
-        self.RightCameraImages.sort()
-
-        leftGray = np.empty([2, 2])
-        rightGray = np.empty([2, 2])
-
-        detectionFailureCount = 0
-        SuccessCount = 0
-
-        for i, fileName in enumerate(self.LeftCameraImages):
-
-            if i > self.maxNrCalibrationImages and self.maxNrCalibrationImages > 0:
-                break
-
-            leftImage = cv.imread(self.LeftCameraImage)
-            rightImage = cv.imread(self.RightCameraImage)
-
-            leftGray = cv.cvtColor(leftImage, cv.COLOR_BGR2GRAY)
-            rightGray = cv.cvtColor(rightImage, cv.COLOR_BGR2GRAY)
-
-            leftSize = leftGray.shape()
-            rightSize = rightGray.shape()
-
-            if leftSize == rightSize:
-                self.imageSize = leftSize
-            else:
-                self.log.pLogErr("Image dimensions don't match. Aborting ...")
-                return False
-
-            readFlags = cv.CALIB_CB_ADAPTIVE_THRESH
-            readFlags |= cv.CALIB_CB_FAST_CHECK
-            readFlags |= cv.CALIB_CB_NORMALIZE_IMAGE
-
-            (ret_l, corners_l) = cv.findChessboardCorners(leftGray,
-                                                          self.boardSize,
-                                                          flags=readFlags)
-
-            (ret_r, corners_r) = cv.findChessboardCorners(rightGray,
-                                                          self.boardSize,
-                                                          flags=readFlags)
-            winSize = (11, 11)
-
-            if ret_l == True and ret_r == True:
-                # TODO: check and correct this
-                self.objpoints.append(self.obj)
-
-                rt_l = cv.cornerSubPix(
-                    leftGray, corners_l, winSize, (-1, -1), self.subPixCriteria)
-
-                rt_r = cv.cornerSubPix(
-                    rightGray, corners_r, winSize, (-1, -1), self.subPixXriteria)
-
-                self.LeftCamera.imgPoints.append(corners_l)
-                self.RightCamera.imgPoints.append(corners_r)
-
-                self.log.pLogMsg("Image pair "+str(i) +
-                                 " processed sucessfully.")
-
-                SuccessCount = SuccessCount + 1
-
-                combinedImage = np.concatenate((leftImage, rightImage), axis=1)
-
-            else:
-                if ret_l == True and ret_r == False:
-                    self.log.pLogMsg("Image pair "+str(i) +
-                                     " pattern not found in right image.")
-                elif ret_l == False and ret_r == True:
-                    self.log.pLogMsg("Image pair "+str(i) +
-                                     " pattern not found in left image.")
-                else:
-                    self.log.pLogMsg("Image pair "+str(i) +
-                                     " pattern not found in both images.")
-                detectionFailureCount = detectionFailureCount + 1
-                self.ImageEliminationList.append(
-                    [self.LeftCameraImages[i], self.RightCameraImages[i]])
-
-        self.imageSize = leftGray.shape[::-1]
-
-        self.log.pLogMsg("")
-        self.log.pLogMsg("Total number of image pairs: "+str(i))
-        self.log.pLogMsg(
-            "Number of succesfully processed image pairs: "+str(SuccessCount))
-        self.log.pLogMsg("Number of discarded image pairs: " +
-                         str(detectionFailureCount))
-        self.log.pLogMsg("")
-
-        if SuccessCount > 0:
-            # Mono calibrate cameras
-            CalibCritera = (cv.TERM_CRITERIA_EPS +
-                            cv.TERM_CRITERIA_MAX_ITER, 300, 1e-6)
-
-            (rt1,
-             self.LeftCamera.Kmat,
-             self.LeftCamera.Dvec,
-             self.LeftCamera.Rmat,
-             self.LeftCamera.Tvec) = cv.calibrateCamera(self.objPoints,
-                                                        self.LeftCamera.imgPoints,
-                                                        self.imageSize,
-                                                        None,
-                                                        None,
-                                                        critera=CalibCritera)
-
-            (rt2,
-             self.RightCamera.Kmat,
-             self.RightCamera.Dvec,
-             self.RightCamera.Rmat,
-             self.RightCamera.Tvec) = cv.calibrateCamera(self.objPoints,
-                                                         self.RightCamera.imgPoints,
-                                                         self.imageSize,
-                                                         None,
-                                                         None,
-                                                         critera=CalibCritera)
-
-            self.LeftCamera.setMonoCalibrated()
-            self.RightCamera.setMonoCalibrated()
-
-            self.log.pLogMsg(
-                "Reprojection Error [px] left: "+str(rt1)+" right: "+str(rt2))
-
-    def stereoCalibrate(self):
-        self.log.pLogMsg("")
-        self.log.pLogMsg("[RUN STEREO CALIBRATION]")
-        self.log.pLogMsg("")
-
-        # Check if any image pairs are in image buffer
-        if len(self.aStereoImagePairs) == 0:
-            self.log.pLogErr(
-                "Stereo image pair buffer is empty. Aborting ... ")
-            # TODO
-
-        # Initialize stereo calibration flags
-        flags = 0
-        # Set flag settings
-        flags |= cv.CALIB_FIX_FOCAL_LENGTH
-        flags |= cv.CALIB_FIX_INTRINSIC
-        flags |= cv.CALIB_USE_INTRINSIC_GUESS
-        flags |= cv.CALIB_ZERO_TANGENT_DIST
-
-        calibCriteria = (cv.TERM_CRITERIA_MAX_ITER +
-                         cv.TERM_CRITERIA_EPS, 250, 1e-6)
-
-        (ret, K1, D1, K2, D2, R, T, E, F) = cv.stereoCalibrate(self.objpoints,
-                                                               self.LeftCamera.imgPoints,
-                                                               self.RightCamera.imgPoints,
-                                                               self.LeftCamera.Kmat,
-                                                               self.LeftCamera.Dvec,
-                                                               self.RightCamera.Kmat,
-                                                               self.RightCamera.Dvec,
-                                                               self.imageSize,
-                                                               criteria=calibCriteria,
-                                                               flags=flags)
-        # TODO: Link calibration outputs to camera instances
-
-        # Update calibration status for both cameras
-        self.LeftCamera.setStereoCalibrated()
-        self.RightCamera.setStereoCalibrated()
-
-        self.log.pLogMsg("> Completed:")
-        self.log.pLogMsg("""> Completed:""")
-
-    def stereoRectify(self):
-        self.log.pLogMsg("")
-        self.log.pLogMsg("[RUN STEREO RECTIFICATION]")
-        self.log.pLogMsg("")
-
-        # Check if any image pairs are in image buffer
-        if len(self.aStereoImagePairs) == 0:
-            self.log.pLogErr(
-                "Stereo image pair buffer is empty. Aborting ... ")
-        # Check if stereo calibration has been performed
-        if (self.LeftCamera.isStereoCalibrationCompleted == False or
-                self.RightCamera.isStereoCalibrationCompleted == False):
-            self.log.pLogErr(
-                "Stereo calibration has not yet been done. Aborting ... ")
-
-        rectificationFlags = cv.CALIB_ZERO_DISPARITY
-
-        # alpha=-1 -> Let OpenCV optimize black parts.
-
-        # alpha= 0 -> Rotate and cut the image so that there will be no black
-        # parts. This option cuts the image so badly most of the time, that
-        # you won’t have a decent high-quality image but worth to try.
-
-        # alpha= 1 -> Make the transform but don’t cut anything.
-
-        setAlpha = -1
-
-        (self.LeftCamera.stereoRmat,
-         self.RightCamera.stereoRmat,
-         self.LeftCamera.stereoPmat,
-         self.RightCamera.stereoPmat,
-         Q) = cv.stereoRectify(cameraMatrix1=self.LeftCamera.stereoKmat,
-                               cameraMatrix2=self.RightCamera.stereoKmat,
-                               distCoeffs1=self.LeftCamera.stereoDvec,
-                               distCoeffs2=self.RightCamera.stereoDvec,
-                               imageSize=self.imageSize,
-                               R=self.LeftCamera.stereoRmat,
-                               T=self.LeftCamera.stereoTvec,
-                               Q=None,
-                               flags=rectificationFlags,
-                               alpha=setAlpha,
-                               newImageSize=self.imageSize)
-
-        self.log.pLogMsg("Stereo Rectification completed")
-
-    def calcReprojectionErrorPerImage(self, CameraData):
-        # Flush reprojection error list
-        CameraData.aReprojErrors = []
-
-        if len(CameraData.objPoints) != 0:
-            TBD = True
+            

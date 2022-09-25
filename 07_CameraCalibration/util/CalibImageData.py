@@ -2,6 +2,7 @@
 
 class CalibImageData():
     
+    # mono calibration image file path
     imageFilePath = ""
     
     averageReprojError = 0
@@ -18,10 +19,22 @@ class CalibImageData():
     
     isPatternFound = False
     
+    # mono calibration image points 
     imagePoints = []
     
+    # stereo calibraiton image points
+    leftImagePoints  = []
+    rightImagePoints = []
+    
+    # mono calibration r and t vectors 
     rvec = []
     tvec = []
+    
+    # stereo calibration r and t vectors
+    left_rvec  = []
+    left_tvec  = []
+    right_rvec = []
+    right_tvec = []
     
     def __init__(self):
         TBD = True

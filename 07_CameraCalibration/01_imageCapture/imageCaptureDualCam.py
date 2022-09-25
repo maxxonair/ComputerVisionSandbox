@@ -19,6 +19,16 @@ import datetime
 import os
 import numpy as np
 
+enablePatternDetector = True
+enableUseBlobDetector = True
+
+
+readFlags = cv2.CALIB_CB_CLUSTERING
+readFlags |= cv2.CALIB_CB_ASYMMETRIC_GRID
+
+criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+boardSize = (5,15)
+
 # Setup folder to save images to 
 dateTimeStr = datetime.datetime.now().strftime("%Y_%M_%d_%h_%m_%s")
 folder_name = dateTimeStr+"_frame_capture"
@@ -38,6 +48,36 @@ imgWindowName = "StereoBench camera image feed [.mk0]"
 cam01_port = 1
 # [!] Rigth stereo bench camera port ID
 cam02_port = 2
+
+# Create blob detector to support assymetric circle detection  
+# TODO: currently not used. Assess if needed.       
+def createBlobDetector():
+    
+    params = cv2.SimpleBlobDetector_Params()
+    
+    params.minThreshold = 50
+    params.maxThreshold = 220
+    
+    params.filterByColor = True
+    params.blobColor = 0
+    
+    params.filterByArea = True
+    params.minArea = 30
+    params.maxArea = 5000
+    
+    params.filterByCircularity = False  
+    params.minCircularity = 0.7
+    params.maxCircularity = 3.4e38
+    
+    params.filterByConvexity = True
+    params.minConvexity = 0.95
+    params.maxConvexity = 3.4e38
+    
+    params.filterByInertia = True
+    params.minInertiaRatio = 0.1
+    params.maxInertiaRatio = 3e38
+    
+    return cv2.SimpleBlobDetector_create(params)
 
 def main():
     # Init image index for saved files 
@@ -87,6 +127,40 @@ def main():
                 # Save as concatenated image pair
                 frame = cv2.hconcat([frame1, frame2])
                 
+                if enablePatternDetector:
+                    frame1_to_show = frame1
+                    frame2_to_show = frame2
+                    if enableUseBlobDetector:
+                        blobDetector = createBlobDetector()
+                    else:
+                        blobDetector=None
+                    
+                    patternFound1, corners1 = cv2.findCirclesGrid( 
+                                                    frame1_to_show, 
+                                                    boardSize, 
+                                                    blobDetector=blobDetector,  
+                                                    flags=readFlags)
+                    patternFound2, corners2 = cv2.findCirclesGrid( 
+                                                    frame2_to_show, 
+                                                    boardSize, 
+                                                    blobDetector=blobDetector,  
+                                                    flags=readFlags)
+                    if patternFound1: 
+                        cv2.drawChessboardCorners(frame1_to_show,
+                                                boardSize,
+                                                corners1,
+                                                patternFound1)
+                    if patternFound2: 
+                        cv2.drawChessboardCorners(frame2_to_show,
+                                                boardSize,
+                                                corners2,
+                                                patternFound2)
+                
+                    frameToDisplay = cv2.hconcat([frame1_to_show, frame2_to_show])
+                else:
+                    frameToDisplay = frame
+                    
+                
                 # Define image name 
                 img_name = "./"+folder_name+"/"+"img_"+str(img_index)+".png"
                 
@@ -94,7 +168,7 @@ def main():
                 img_gray = cv2.cvtColor(frame , cv2.COLOR_BGR2GRAY)
                 
                 # Resize image for display
-                display_img = cv2.resize(img_gray, (1200,600), interpolation=cv2.INTER_AREA)
+                display_img = cv2.resize(frameToDisplay, (1200,600), interpolation=cv2.INTER_AREA)
                 
                 # Show image pair 
                 cv2.imshow(imgWindowName, display_img)
@@ -122,6 +196,7 @@ def main():
     capture_01.release()
     capture_02.release()
     cv2.destroyAllWindows()
+    
     
 if __name__=="__main__":
     main()

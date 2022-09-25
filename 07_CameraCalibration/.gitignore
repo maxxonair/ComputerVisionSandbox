@@ -5,8 +5,7 @@
 
 # Except
 !.gitignore
-!./util/*
-!imageCaptureDualCam.py
-!imageCaptureSingleCam.py
+!**/*.py
+!01_imageCapture/**/*.py
 !runCalibration.py
 
