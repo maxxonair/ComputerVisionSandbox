@@ -10,6 +10,7 @@ import cv2 as cv
 from tqdm import tqdm
 import glob
 import numpy as np
+import os
 
 from util.CameraMetaData import CameraData
 from util.CalibImageData import CalibImageData
@@ -69,7 +70,7 @@ class StereoCalibrator:
     #       OpenCV calibration setting parameters 
     # --------------------------------------------------------------------------
     subPixCriteria = (cv.TERM_CRITERIA_EPS +
-                      cv.TERM_CRITERIA_MAX_ITER, 30, 0.1)
+                      cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
     # Initialize stereo calibration flags
     stereoCalibFlags = 0
     # Set flag settings
@@ -79,7 +80,7 @@ class StereoCalibrator:
     stereoCalibFlags |= cv.CALIB_ZERO_TANGENT_DIST
 
     stereoCalibCriteria = (cv.TERM_CRITERIA_MAX_ITER +
-                        cv.TERM_CRITERIA_EPS, 250, 1e-6)
+                        cv.TERM_CRITERIA_EPS, 300, 1e-6)
     
     rectificationFlags = cv.CALIB_ZERO_DISPARITY
 
@@ -175,6 +176,13 @@ class StereoCalibrator:
         self.aSuccIndexList = []
         
         self.aImageList     = []
+        
+        if len(self.dual_images) == 0:
+            self.log.pLogErr("")
+            self.log.pLogErr("No calibration images found.")
+            self.log.pLogErr("Exiting.")
+            self.log.pLogErr("")
+            return 0
 
         for ii, fname in tqdm( enumerate( self.dual_images ) ):
             # Load dual image
@@ -332,6 +340,16 @@ class StereoCalibrator:
             self.log.pLogErr(
                 "List of valid stereo image pairs (pattern found) is empty. Exiting.")
             return False
+            
+        stereoCalibFlags = ( cv.CALIB_FIX_ASPECT_RATIO + 
+                            cv.CALIB_ZERO_TANGENT_DIST +
+                            cv.CALIB_USE_INTRINSIC_GUESS +
+                            cv.CALIB_SAME_FOCAL_LENGTH +
+                            cv.CALIB_FIX_PRINCIPAL_POINT)
+                            # cv.CALIB_RATIONAL_MODEL +
+                            # cv.CALIB_FIX_K3 + 
+                            # cv.CALIB_FIX_K4 + 
+                            # cv.CALIB_FIX_K5)
 
         (flagStereoCalibrationSucceeded, 
          self.stereoCalibData.K1, 
@@ -352,9 +370,9 @@ class StereoCalibrator:
          self.RightCamera.Dvec,
          self.imageSize,
          criteria=self.stereoCalibCriteria,
-         flags=self.stereoCalibFlags
+         flags=stereoCalibFlags
          )
-        
+
         if flagStereoCalibrationSucceeded:
             (self.stereoCalibData.R1,
             self.stereoCalibData.R2,
@@ -373,7 +391,7 @@ class StereoCalibrator:
             T=self.stereoCalibData.T,
             flags=self.rectificationFlags,
             alpha=self.stereoCalibAlpha,
-            newImageSize=self.imageSize
+            newImageSize=self.imageSize,
             )
 
             self.log.pLogMsg("")
@@ -430,35 +448,47 @@ class StereoCalibrator:
                 
                 for index, image in enumerate(img_list):
                     h,  w = image.shape[:2]
-                    if index == 1:
+                    if index == 0:
                         aKmat = self.stereoCalibData.K1
                         aDist = self.stereoCalibData.D1
+                        R_mat = self.stereoCalibData.R1
                     else:
                         aKmat = self.stereoCalibData.K2
                         aDist = self.stereoCalibData.D2
+                        R_mat = self.stereoCalibData.R2
 
+                    # The function computes the optimal new camera matrix based on the free scaling parameter. 
+                    # By varying this parameter the user may retrieve only sensible pixels alpha=0, keep all the 
+                    # original image pixels if there is valuable information in the corners alpha=1, or get something 
+                    # in between. When alpha>0, the undistortion result will likely have some black pixels corresponding 
+                    # to “virtual” pixels outside of the captured distorted image. The original camera matrix, distortion
+                    # coefficients, the computed new camera matrix and the newImageSize should be passed to 
+                    # InitUndistortRectifyMap to produce the maps for Remap.
+                    newCamMatAlpha = 0
                     newcameramtx, roi = cv.getOptimalNewCameraMatrix(aKmat,
                                                                     aDist,
-                                                                    (w, h), 1,
+                                                                    (w, h), 
+                                                                    newCamMatAlpha,
                                                                     (w, h))
 
-                    if self.bFlagUseRemapping:
-                        # undistort
-                        mapx, mapy = cv.initUndistortRectifyMap(aKmat,
-                                                                aDist,
-                                                                None,
-                                                                newcameramtx,
-                                                                (w, h),
-                                                                cv.CV_32FC1)
-                        
-                        dst = cv.remap(image, mapx, mapy, cv.INTER_LINEAR)
-                    else:
-                        # undistort
-                        dst = cv.undistort(image,
-                                        self.aKmat,
-                                        self.aDist,
-                                        None,
-                                        newcameramtx)
+                    # if self.bFlagUseRemapping:
+                    # undistort
+                    mapx, mapy = cv.initUndistortRectifyMap(aKmat,
+                                                            aDist,
+                                                            R_mat,
+                                                            newcameramtx,
+                                                            (w, h),
+                                                            cv.CV_32FC1)
+                    # cv.CV_16SC2
+                    # cv.CV_32FC1
+                    dst = cv.remap(image, mapx, mapy, cv.INTER_LANCZOS4)
+                    # else:
+                    #     # undistort
+                    #     dst = cv.undistort(image,
+                    #                     self.aKmat,
+                    #                     self.aDist,
+                    #                     None,
+                    #                     newcameramtx)
 
                     # crop the image
                     x, y, w, h = roi
@@ -469,12 +499,24 @@ class StereoCalibrator:
                     rect_img_list.append(dst)
 
                 frameToDisplay = cv.hconcat([rect_img_list[0], rect_img_list[1]])
+                # Number of evenly spaced horizontal lines             
+                nrLines = 20
+                enableDrawVerticalLines = True
+
+                if enableDrawVerticalLines:
+                    lineDistance= h/nrLines
+                    (h, w) = frameToDisplay.shape
+                    for line in range(nrLines):
+                        lineY = int(line * lineDistance)
+                        line_thickness = 1
+                        cv.line(frameToDisplay, (0, lineY), (w, lineY), (0, 255, 0), thickness=line_thickness)
+                    
                 disparity_image = self._computeDepthMap(rect_img_list[0], rect_img_list[1]) 
                 # Print status
                 fileName = str(iIndex) + '_rectified'
                 fileNameDispMap = str(iIndex) + '_dispMap'
-                cv.imwrite(self.sRecifiedImgPath + fileName+".png", frameToDisplay)
-                cv.imwrite(self.sDisparityMapsPath + fileNameDispMap+".png", disparity_image)
+                cv.imwrite(os.path.join(self.sRecifiedImgPath , fileName+".png"), frameToDisplay)
+                cv.imwrite(os.path.join(self.sDisparityMapsPath , fileNameDispMap+".png"), disparity_image)
                 iIndex = iIndex + 1
         else:
             self.log.pLogErr('Rectification aborted. No calibration data.')
