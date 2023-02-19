@@ -4,6 +4,7 @@
 *.jpg
 *.jpeg
 *.pgm
+__pycache__/
 
 ./01_StereoVision/01_calibration_images/*.png
 ./01_StereoVision/01_calibration_images/*.jpg
