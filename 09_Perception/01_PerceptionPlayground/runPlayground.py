@@ -12,7 +12,7 @@ sCalibrationMatricesFilePath  = os.path.join('assets','02_camera_calibration','s
 sLeftUndistortionMapFilePath  = os.path.join('assets','02_camera_calibration','caml_undistortion_map.tiff')
 sRightUndistortionMapFilePath = os.path.join('assets','02_camera_calibration','camr_undistortion_map.tiff')
 
-testIndex = 26
+testIndex = 75
 sTestImageFilePath=os.path.join('assets','01_input_images','img_'+str(testIndex)+'.png')
 
 # [Load camera calibration matrices]
@@ -27,11 +27,33 @@ undist_maps = io.loadStereoUndistortionMaps(sLeftUndistortionMapFilePath, sRight
 # [Rectify raw images]
 (rimgl, rimgr) = img.rectifyStereoImageSet(imgl, imgr, undist_maps)
 
-# [Display images]
-# Show raw and undistorted images
-print(' --> Show Rectified Stereo Image')
-show.plotStereoImageRectification(imgl, imgr, rimgl, rimgr)
+# [Create Disparity Map]
+(rawDispMap, 
+ dispMapFiltered, 
+ dispMapFilteredAndNormalized) = img.createDisparityMap(rimgl, rimgr)
 
-# print()
-# print(' --> Show Rectified Stereo Image')
-# show.plotStereoImage(rimgl, rimgr)
+io.saveArrayAsCsv(dispMapFiltered, "./output/filteredDisparityMap.csv")
+
+# [Create Depth Map]
+depthMap = img.computeDepthMapFromDispMap(dispMapFiltered, cam_calibration["P2"])
+
+io.saveArrayAsCsv(depthMap, "./output/filteredDepthMap.csv")
+
+# [Display images]
+enableSaveToFile = False
+
+enableShowRawAndRectified = False
+enableShowRectifiedOnly   = False
+enableShowDisparityMap    = True
+
+# Show raw and undistorted images
+if enableShowRawAndRectified:
+    print(' --> Show Rectified Stereo Image')
+    show.plotStereoImageRectification(imgl, imgr, rimgl, rimgr, enableSaveToFile)
+
+if enableShowRectifiedOnly:
+    print(' --> Show Rectified Stereo Image')
+    show.plotStereoImage(rimgl, rimgr)
+
+if enableShowDisparityMap:
+    show.plotDisparityMap(rimgl, rimgr, dispMapFiltered, depthMap, enableSaveToFile)

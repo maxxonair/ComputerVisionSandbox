@@ -63,7 +63,8 @@ def loadCalibrationParameters(sCalibrationParameterDirectory_in):
     fileStorage.release()
     return cameraCalibrationData
 
-
+def saveArrayAsCsv(array_in, sFilePath_in):
+    np.savetxt(sFilePath_in, array_in, delimiter=",")
 
 def loadStereoUndistortionMaps(sLeftUndistortionMapFilePath, sRightUndistortionMapFilePath):
     
