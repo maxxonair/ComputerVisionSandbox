@@ -10,6 +10,12 @@ class CalibImageData():
     
     reprojErrorArray_left = []
     reprojErrorArray_right = []
+
+    reprojImgPoints_left  = []
+    reprojImgPoints_right = []
+
+    rawLeftImg  = []
+    rawRightImg = []
     
     # Reprojection error statistics
     # min/max and standard variation per image 

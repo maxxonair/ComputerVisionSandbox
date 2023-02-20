@@ -27,6 +27,9 @@ from util.PyLog import PyLog
 from util.MonoCalibrator import MonoCalibrator
 from util.StereoCalibrator import StereoCalibrator
 
+import camera_calibration_targets.chessboard.chessboard_a3 as chessboard
+import camera_calibration_targets.asymmetric_circles.acircles_a3 as acircles
+
 def main():
     # -----------------------------------------------------------------------------
     #               >> Folder Setup
@@ -35,23 +38,23 @@ def main():
     # Mono test set 
     # raw_img_path = "./_camera_01_calibration/2022_44_28_Aug_08_1661683472_frame_capture/"
     # Stereo set 
-    raw_img_path = "./_camera_01_calibration/2022_44_28_Aug_08_1661683472_frame_capture/"
-
+    # raw_img_path = "./_camera_01_02_stereo_calibration_24_01_2023/_raw_imgs/2023_26_22_Jan_01_1674419201_frame_capture"
+    raw_img_path= './_stereoBench_calibration_20_02_2023/01_raw_calibration_imgs/'
     # >> Setup folder structure 
     # Setup folder to save images to 
     dateTimeStr = datetime.datetime.now().strftime("%Y_%m_%d__%H_%M_%S")
     folder_name = dateTimeStr+"_camera_"+str(camera_ID)+"_calibration"
     # start time counter 
-    path = "./" + folder_name
+    path = "./02_camera_calibration_results/" + folder_name
     os.mkdir(path)
 
     # Set file paths: 
-    parameterFilePath   = path + "/03_camera_parameters/"
-    processedImagePath  = path + "/02_processed_calibration_images/"
-    inputFilePath       = raw_img_path # path + "/01_calibration_images/"
-    scaledImgPath       = path + "/06_scaled_images/"
-    sRecifiedImgPath    = path + '/05_corrected_images/'
-    sDisparityMapsPath  = path + '/07_disparity_map/'
+    parameterFilePath   = os.path.join(path , "03_camera_parameters/")
+    processedImagePath  = os.path.join(path , "02_processed_calibration_images/")
+    inputFilePath       = os.path.join(raw_img_path) # path + "/01_calibration_images/"
+    scaledImgPath       = os.path.join(path , "06_scaled_images/")
+    sRecifiedImgPath    = os.path.join(path , '05_corrected_images/')
+    sDisparityMapsPath  = os.path.join(path , '07_disparity_map/')
 
     os.mkdir(parameterFilePath)
     os.mkdir(processedImagePath)
@@ -70,7 +73,7 @@ def main():
     # Calibration mode 
     # mono   -> monocular calibration on single camera image
     # stereo -> stereo calibration on dual camera images
-    calibrationMode = "stereo" 
+    calibrationMode          = "stereo" 
     #=================================================================
     # Define calibration board
     #=================================================================
@@ -78,25 +81,43 @@ def main():
     # [!!!] Number of inner corners per a chessboard row and column 
     #( patternSize = cvSize (points_per_row, points_per_colum) = 
     #cvSize(columns,rows) ).
-    boardSize = (5,15)
+    
+    aCircBoardOne = acircles.getCalibrationBoardProperties()
+    chessBoardOne = chessboard.getCalibrationBoardProperties()
 
-    # Factor to calculate between diagonal distance between dots and vertical distance
-    # between dots of the same column
-    acircleFactor = math.sqrt(2)
+    # Set board dimsension in corner points per column and row
+    # E.g. the following chessboard, boardSize = (5,6)
+    # --->
+    # | [x][ ][x][ ][x][ ][x]
+    # | [ ][x][ ][x][ ][x][ ]
+    # | [x][ ][x][ ][x][ ][x]
+    # | [ ][x][ ][x][ ][x][ ]
+    # | [x][ ][x][ ][x][ ][x]
+    # | [ ][x][ ][x][ ][x][ ]
+    # |
+    # v
+
+    boardSize                =  chessBoardOne["boardSize"]
+
     # Physical distance between pattern feature points [m]
     # > chessboard     -> horizontal/vertical spacing between corners
     # > assym. circles -> diagonal spacing between dots
-    phys_corner_dist = 0.04 * acircleFactor
+    phys_corner_dist         =  chessBoardOne["cornerDist_m"]
     
-    sPatternType = "acircles"
+    # Set pattern type: 
+    # Options: chessboard, acircles
+    sPatternType             = chessBoardOne["PatternType"]
     # -----------------------------------------------------------------------------
     #   >> Setup Logger
     # -----------------------------------------------------------------------------
     # Flag: Enable console prints 
-    flagIsConsolePrint = True 
+    flagIsConsolePrint       = True 
     # Flag: Create and save logging text file
-    flagIsSaveLogFile  = True 
-    log = PyLog(path, "CalibrationLog", flagIsConsolePrint, flagIsSaveLogFile)
+    flagIsSaveLogFile        = True 
+    log                      = PyLog(path, 
+                                     "CalibrationLog", 
+                                     flagIsConsolePrint, 
+                                     flagIsSaveLogFile)
     # -----------------------------------------------------------------------------
     # Empty folder for processed images 
     cleanFolder(processedImagePath)
@@ -109,17 +130,17 @@ def main():
     #------------------------------------------------------------------------------
     # >> Calibrate [MONOCULAR]
     #------------------------------------------------------------------------------
-    if calibrationMode is "mono":
+    if calibrationMode == "mono":
         # Initialize calibration
         calibrator = MonoCalibrator(inputFilePath, 
-                                processedImagePath,
-                                scaledImgPath,
-                                parameterFilePath,
-                                sRecifiedImgPath,
-                                boardSize,
-                                phys_corner_dist,
-                                sPatternType,
-                                log)
+                                    processedImagePath,
+                                    scaledImgPath,
+                                    parameterFilePath,
+                                    sRecifiedImgPath,
+                                    boardSize,
+                                    phys_corner_dist,
+                                    sPatternType,
+                                    log)
 
         # Settings flags:
         calibrator.setEnableImgScaling(enableScaling)
@@ -173,39 +194,48 @@ def main():
     #------------------------------------------------------------------------------
     # >> Calibrate [STEREO]
     #------------------------------------------------------------------------------
-    if calibrationMode is "stereo":
+    if calibrationMode == "stereo":
         # Stereo set 
-        raw_img_path = "./_camera_01_02_stereo_calibration/2022_22_23_Sep_09_1663953735_frame_capture/"
+        # raw_img_path = "/Users/MrX/Documents/003_Tools/42_ImageProcessing/07_CameraCalibration/_camera_01_02_stereo_calibration/_raw_images/2022_20_09_Oct_10_1665307240_frame_capture/"
+        raw_img_path= './_stereoBench_calibration_20_02_2023/01_raw_calibration_imgs/'
         inputFilePath = raw_img_path
-        # Initialize calibration
-        calibrator = StereoCalibrator(  inputFilePath, 
-                                        processedImagePath,
-                                        scaledImgPath,
-                                        parameterFilePath,
-                                        sRecifiedImgPath,
-                                        sDisparityMapsPath,
-                                        boardSize,
-                                        phys_corner_dist,
-                                        sPatternType,
-                                        log)
+        # Initialize stereo calibration instance 
+        calibrator = StereoCalibrator(inputFilePath, 
+                                    processedImagePath,
+                                    scaledImgPath,
+                                    parameterFilePath,
+                                    sRecifiedImgPath,
+                                    sDisparityMapsPath,
+                                    boardSize,
+                                    phys_corner_dist,
+                                    sPatternType,
+                                    log)
 
         # Settings flags:
-        calibrator.setEnableImgScaling(enableScaling)
+
+        calibrator.setEnableImgScaling(False)
+        # Enalbe saving raw images with corner points drawn onto them
         calibrator.setEnableMarkedImages(True)
-        calibrator.setEnableSaveScaledImages(enableSaveScaledImgs)
-        calibrator.setEnableRemapping(True)
+        #
+        calibrator.setEnableSaveScaledImages(False)
         # This setting does not work with rectifyCalibImages 
         # -> (concat differently sized images ...)
         calibrator.setCropRectifiedImages(False)
+        # Blob detector is only relevant when calibration with a circle pattern board
+        # Using blob detector on top of pattern recognition improves the yield
         calibrator.setEnableUseBlobDetector(True)
         
         # Run >> read stereo pairs + [MONOCULAR CALIBRATION]
         calibrator.readStereoPairs()
 
+        # [CALIBRATE stereo cameras]
         calibrator.stereoCalibrate()
         
         # Rectify calibration image set and create disparity maps ()
-        # calibrator.rectifyCalibImages()
+        calibrator.rectifyCalibImages()
+
+        # Draw re-projected image points on rectified images to check calibration
+        # calibrator.drawReprojectedCornerPoints()
 
     #------------------------------------------------------------------------------ 
     log.close()

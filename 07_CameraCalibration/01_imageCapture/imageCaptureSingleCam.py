@@ -20,7 +20,9 @@ os.mkdir(path)
 
 img_index = 0 
 
-cap = cv2.VideoCapture(1)
+camera_index = 1
+
+cap = cv2.VideoCapture(camera_index)
 
 # Check if the webcam is opened correctly
 if not cap.isOpened():

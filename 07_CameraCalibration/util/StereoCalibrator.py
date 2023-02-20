@@ -36,6 +36,7 @@ class StereoCalibrator:
     bFlagSaveScaledImages = False
     bFlagUseRemapping     = False
     enableUseBlobDetector = True
+    bEnableCreateDispMapsFromCalibImgs = False
 
     # File Paths
     sInputFilePath      = ''
@@ -61,6 +62,11 @@ class StereoCalibrator:
     aKmat = []
     aDist = []
 
+    lmapx = []
+    lmapy = []
+    rmapx = []
+    rmapy = []
+
     totalReprojectionError = 0
 
     rectificationAlpha = 0
@@ -70,7 +76,7 @@ class StereoCalibrator:
     #       OpenCV calibration setting parameters 
     # --------------------------------------------------------------------------
     subPixCriteria = (cv.TERM_CRITERIA_EPS +
-                      cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+                      cv.TERM_CRITERIA_MAX_ITER, 100, 1e-4)
     # Initialize stereo calibration flags
     stereoCalibFlags = 0
     # Set flag settings
@@ -91,7 +97,7 @@ class StereoCalibrator:
     # you won’t have a decent high-quality image but worth to try.
 
     # alpha= 1 -> Make the transform but don’t cut anything.
-    stereoCalibAlpha = -1
+    stereoCalibAlpha = 0
     # --------------------------------------------------------------------------
     # Restrict the number of calibration images to a maximum value:
     maxNrCalibrationImages = -1
@@ -101,7 +107,7 @@ class StereoCalibrator:
     aImageList = []
 
     # termination criteria
-    criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 100, 0.001)
+    criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 300, 1e-6)
     # --------------------------------------------------------------------------
     #   >> Setters and Getters
     # --------------------------------------------------------------------------
@@ -136,7 +142,7 @@ class StereoCalibrator:
     def __init__(self, sInputFilePath, sProcessedImagePath, sScaledImgPath,
                  sParameterFilePath, sRecifiedImgPath, sDisparityMapsPath,
                  boardSize, objectSize, sPatternType, log):
-        self.log = log
+        self.log                    = log
         self.sInputFilePath         = sInputFilePath
         self.sProcessedImagePath    = sProcessedImagePath
         self.sScaledImgPath         = sScaledImgPath
@@ -151,11 +157,13 @@ class StereoCalibrator:
 
         self.aStereoImagePairs      = []
 
-        self.LeftCamera  = CameraData("Left_Camera")
-        self.RightCamera = CameraData("Right_Camera")
+        self.LeftCamera             = CameraData("Left_Camera")
+        self.RightCamera            = CameraData("Right_Camera")
         
-        self.stereoCalibData = StereoCalibrationData(self.log)
-
+        self.stereoCalibData        = StereoCalibrationData(self.log)
+        
+        self.isUndistMapsLeftSaved  = False
+        self.isUndistMapsRightSaved = False
         # Prepare object points
         if self.sPatternType == "acircles":
             self._createAcircleObjectPoints()
@@ -168,6 +176,17 @@ class StereoCalibrator:
     #   >> Class functions Stereo Calibration
     # --------------------------------------------------------------------------
     def readStereoPairs(self):
+        self.log.pLogMsg("[START STEREO CALIBRATION PROCEDURE]")
+        self.log.pLogMsg("Calibration board pattern type        : {}".format(self.sPatternType))
+        self.log.pLogMsg("Calibration board corner points       : {}".format(self.boardSize))
+        self.log.pLogMsg("Calibration board corner distance [m] : {}".format(self.objectSize))
+        self.log.pLogMsg("Raw calibration images path           : {}".format(self.sInputFilePath))
+        self.log.pLogMsg("Save marked raw images                : {}".format(self.bFlagSaveMarkedImages))
+        self.log.pLogMsg(self._createLargeSeparator())
+        self.log.pLogMsg("")
+        self.log.pLogMsg("[READ RAW CALIBRATION IMAGES]")
+        self.log.pLogMsg("")
+        self.log.pLogMsg(self._createLargeSeparator())
         # List calibration images:
         self.dual_images    = glob.glob(self.sInputFilePath+"*")
         imageIndex          = 0
@@ -223,7 +242,7 @@ class StereoCalibrator:
             self.log.pLogMsg('Load image pair : ' + str(imageIndex))
             patternFound = False
 
-            if self.sPatternType is  "acircles":
+            if self.sPatternType ==  "acircles":
                 # Set flags for assymetric circle pattern detection
                 readFlags = cv.CALIB_CB_CLUSTERING
                 readFlags |= cv.CALIB_CB_ASYMMETRIC_GRID
@@ -245,15 +264,15 @@ class StereoCalibrator:
                                                                     self.boardSize, 
                                                                     blobDetector=self.blobDetector,  
                                                                     flags=readFlags)
-            elif self.sPatternType is  "chessboard":
-                readFlags = cv.CALIB_CB_ADAPTIVE_THRESH
+            elif self.sPatternType ==  "chessboard":
+                readFlags  = cv.CALIB_CB_ADAPTIVE_THRESH
                 readFlags |= cv.CALIB_CB_FILTER_QUADS
                 readFlags |= cv.CALIB_CB_NORMALIZE_IMAGE
                 # Find the chess board corners
-                patternFound_left, corners_left = cv.findChessboardCorners( leftImage,
+                patternFound_left, corners_left   = cv.findChessboardCorners(leftImage,
                                                                             self.boardSize,
                                                                             flags=readFlags)
-                patternFound_right, corners_right = cv.findChessboardCorners( rightImage,
+                patternFound_right, corners_right = cv.findChessboardCorners(rightImage,
                                                                             self.boardSize,
                                                                             flags=readFlags)
 
@@ -264,20 +283,18 @@ class StereoCalibrator:
             if patternFound_left == True and patternFound_right == True:
                 patternFound = True
                 # If Chessboard calibration -> run cornerSubPix refinement
-                if self.sPatternType is  "chessboard":
-                    corners2_left = cv.cornerSubPix(leftImage, 
-                                                    corners_left,
-                                                    (11, 11),
-                                                    (-1, -1),
-                                                    self.subPixCriteria)
-                    
-                if self.sPatternType is  "chessboard":
-                    corners2_right = cv.cornerSubPix(rightImage, 
-                                                     corners_right,
-                                                    (11, 11),
-                                                    (-1, -1),
-                                                    self.subPixCriteria)
+                corners2_left = cv.cornerSubPix(leftImage, 
+                                                corners_left,
+                                                (11, 11),
+                                                (-1, -1),
+                                                self.subPixCriteria)
                 
+                corners2_right = cv.cornerSubPix(rightImage, 
+                                                    corners_right,
+                                                (11, 11),
+                                                (-1, -1),
+                                                self.subPixCriteria)
+            
                 # Update success state
                 self.bFlagCalibrationComplete = True
                 self.aSuccIndexList.append(imageIndex)
@@ -287,11 +304,11 @@ class StereoCalibrator:
                 if self.bFlagSaveMarkedImages:
                     cv.drawChessboardCorners(leftImageColor,
                                              self.boardSize,
-                                             corners_left,
+                                             corners2_left,
                                              patternFound)
                     cv.drawChessboardCorners(rightImageColor,
                                              self.boardSize,
-                                             corners_right,
+                                             corners2_right,
                                              patternFound)
                     fileName = str(imageIndex) + '_calib.png'
                     savePath = self.sProcessedImagePath + fileName
@@ -307,33 +324,39 @@ class StereoCalibrator:
                     self.log.pLogMsg(str(imageIndex)+")  [No calibration pattern found in left image].")
                 else :
                     self.log.pLogMsg(str(imageIndex)+")  [No calibration pattern found in both images].")
-            
-            # Set Values:
-            calibImageData.imageFilePath        = fname
-            calibImageData.imageIndex           = ii
-            calibImageData.isPatternFound       = patternFound
-            calibImageData.leftImagePoints      = corners_left
-            calibImageData.rightImagePoints     = corners_right
-            # Append image data to list
-            self.aImageList.append(calibImageData)
+
+            if patternFound:
+                # Set Values:
+                calibImageData.imageFilePath        = fname
+                calibImageData.imageIndex           = ii
+                calibImageData.isPatternFound       = patternFound
+                calibImageData.leftImagePoints      = corners2_left
+                calibImageData.rightImagePoints     = corners2_right
+                calibImageData.rawLeftImg           = leftImage
+                calibImageData.rawRightImg          = rightImage
+                # Append image data to list
+                self.aImageList.append(calibImageData)
             
             imageIndex = imageIndex + 1
 
-
+        self.log.pLogMsg(self._createLineSeparator())
         self.log.pLogMsg('>> Pattern found in '
                          + str(self.iNrImagesInSet)
                          + '/'+str(imageIndex)
                          + " images. %.2f percent yield" %
                          (self.iNrImagesInSet/imageIndex * 100))
+        self.log.pLogMsg(self._createLineSeparator())
 
 
         self._monoCalibrate()
     
     # Function: Run stereo calibration and save images 
     def stereoCalibrate(self):
+        self.log.pLogMsg(self._createLargeSeparator())
         self.log.pLogMsg("")
         self.log.pLogMsg("[RUN STEREO CALIBRATION]")
         self.log.pLogMsg("")
+        self.log.pLogMsg(self._createLargeSeparator())
 
         # Check if any image pairs are in image buffer
         if len(self.aImageListToObjPointList) == 0:
@@ -345,7 +368,7 @@ class StereoCalibrator:
                             cv.CALIB_ZERO_TANGENT_DIST +
                             cv.CALIB_USE_INTRINSIC_GUESS +
                             cv.CALIB_SAME_FOCAL_LENGTH +
-                            cv.CALIB_FIX_PRINCIPAL_POINT)
+                            cv.CALIB_FIX_PRINCIPAL_POINT )
                             # cv.CALIB_RATIONAL_MODEL +
                             # cv.CALIB_FIX_K3 + 
                             # cv.CALIB_FIX_K4 + 
@@ -373,6 +396,20 @@ class StereoCalibrator:
          flags=stereoCalibFlags
          )
 
+        # Free scaling parameter. If it is -1 or absent, the function performs the default scaling. Otherwise, 
+        # the parameter should be between 0 and 1. alpha=0 means that the rectified images are zoomed and shifted 
+        # so that only valid pixels are visible (no black areas after rectification). alpha=1 means that the 
+        # rectified image is decimated and shifted so that all the pixels from the original images from the cameras 
+        # are retained in the rectified images (no source image pixels are lost). Any intermediate value yields an 
+        # intermediate result between those two extreme cases. 
+        self.stereoCalibAlpha = -1
+
+        # Operation flags that may be zero or CALIB_ZERO_DISPARITY . If the flag is set, the function makes the 
+        # principal points of each camera have the same pixel coordinates in the rectified views. And if the flag 
+        # is not set, the function may still shift the images in the horizontal or vertical direction (depending 
+        # on the orientation of epipolar lines) to maximize the useful image area. 
+        self.rectificationFlags = cv.CALIB_ZERO_DISPARITY
+
         if flagStereoCalibrationSucceeded:
             (self.stereoCalibData.R1,
             self.stereoCalibData.R2,
@@ -394,12 +431,16 @@ class StereoCalibrator:
             newImageSize=self.imageSize,
             )
 
+            print(roi_left)
+            print(roi_right)
+
             self.log.pLogMsg("")
             self.log.pLogMsg("Stereo Rectification completed")
             self.log.pLogMsg("")
             
             # Print complete set of stereo calibration parameters
-            self.stereoCalibData.printStereoCalibrationData()
+            self.stereoCalibData.printStereoCalibrationData(self.imageSize)
+            self.log.pLogMsg(self._createLargeSeparator())
 
             # Update calibration status for both cameras
             self.LeftCamera.setStereoCalibrated()
@@ -428,6 +469,9 @@ class StereoCalibrator:
             self.log.pLogMsg('')
             self.log.pLogMsg(str(len(images))+' image pairs found. Start rectification.')
             iIndex = 0
+            isLeftRemapped  = False
+            isRightRemapped = False
+
             for fname in tqdm(images):
                 # Load image
                 dual_img = cv.imread(fname)
@@ -448,14 +492,6 @@ class StereoCalibrator:
                 
                 for index, image in enumerate(img_list):
                     h,  w = image.shape[:2]
-                    if index == 0:
-                        aKmat = self.stereoCalibData.K1
-                        aDist = self.stereoCalibData.D1
-                        R_mat = self.stereoCalibData.R1
-                    else:
-                        aKmat = self.stereoCalibData.K2
-                        aDist = self.stereoCalibData.D2
-                        R_mat = self.stereoCalibData.R2
 
                     # The function computes the optimal new camera matrix based on the free scaling parameter. 
                     # By varying this parameter the user may retrieve only sensible pixels alpha=0, keep all the 
@@ -465,35 +501,69 @@ class StereoCalibrator:
                     # coefficients, the computed new camera matrix and the newImageSize should be passed to 
                     # InitUndistortRectifyMap to produce the maps for Remap.
                     newCamMatAlpha = 0
-                    newcameramtx, roi = cv.getOptimalNewCameraMatrix(aKmat,
-                                                                    aDist,
-                                                                    (w, h), 
-                                                                    newCamMatAlpha,
-                                                                    (w, h))
+                    if index == 0 and not isLeftRemapped:
+                        isLeftRemapped = True
+                        newcameramtx, roil = cv.getOptimalNewCameraMatrix(self.stereoCalibData.K1,
+                                                                         self.stereoCalibData.D1,
+                                                                         (w, h), 
+                                                                         newCamMatAlpha,
+                                                                         (w, h))
 
-                    # if self.bFlagUseRemapping:
-                    # undistort
-                    mapx, mapy = cv.initUndistortRectifyMap(aKmat,
-                                                            aDist,
-                                                            R_mat,
-                                                            newcameramtx,
-                                                            (w, h),
-                                                            cv.CV_32FC1)
+                        self.lmapx, self.lmapy = cv.initUndistortRectifyMap(self.stereoCalibData.K1,
+                                                                            self.stereoCalibData.D1,
+                                                                            self.stereoCalibData.R1,
+                                                                            newcameramtx,
+                                                                            (w, h),
+                                                                            cv.CV_32FC1)
+
+                    if index == 1 and not isRightRemapped:
+                        isRightRemapped = True
+                        newcameramtx, roir = cv.getOptimalNewCameraMatrix(self.stereoCalibData.K2,
+                                                                         self.stereoCalibData.D2,
+                                                                         (w, h), 
+                                                                         newCamMatAlpha,
+                                                                         (w, h))
+
+                        self.rmapx, self.rmapy = cv.initUndistortRectifyMap(self.stereoCalibData.K2,
+                                                                self.stereoCalibData.D2,
+                                                                self.stereoCalibData.R2,
+                                                                newcameramtx,
+                                                                (w, h),
+                                                                cv.CV_32FC1)
+                    
+                    # Save undistoriton maps to file 
+                    if not self.isUndistMapsLeftSaved:                                    
+                        if index == 0:
+                            self.log.pLogMsg('Saving left camera undistortion map -> caml_undistortion_map.tiff')
+                            (caml_mapx, caml_mapy) = cv.convertMaps(map1=self.lmapx, map2=self.lmapy, dstmap1type=cv.CV_16SC2)
+                            stacked = np.dstack([caml_mapx.astype(np.uint16), caml_mapy])
+                            cv.imwrite(os.path.join(self.sParameterFilePath,"caml_undistortion_map.tiff"), stacked)
+                            self.isUndistMapsLeftSaved = True
+                    if not self.isUndistMapsRightSaved:
+                        if index != 0:
+                            self.log.pLogMsg('Saving right camera undistortion map -> camr_undistortion_map.tiff')
+                            (camr_mapx, camr_mapy) = cv.convertMaps(map1=self.rmapx, map2=self.rmapy, dstmap1type=cv.CV_16SC2)
+                            stacked = np.dstack([camr_mapx.astype(np.uint16), camr_mapy])
+                            cv.imwrite(os.path.join(self.sParameterFilePath,"camr_undistortion_map.tiff"), stacked)
+                            self.isUndistMapsRightSaved = True
+
                     # cv.CV_16SC2
                     # cv.CV_32FC1
-                    dst = cv.remap(image, mapx, mapy, cv.INTER_LANCZOS4)
-                    # else:
-                    #     # undistort
-                    #     dst = cv.undistort(image,
-                    #                     self.aKmat,
-                    #                     self.aDist,
-                    #                     None,
-                    #                     newcameramtx)
+                    if index == 0:
+                        # Remap left image
+                        dst = cv.remap(image, self.lmapx, self.lmapy, cv.INTER_LANCZOS4)
+                        # crop the image
+                        x, y, w, h = roil
+                        if self.bFlagCropRectifImages:
+                            dst = dst[y:y+h, x:x+w]
+                    else:
+                        # Remap right image 
+                        dst = cv.remap(image, self.rmapx, self.rmapy, cv.INTER_LANCZOS4)
+                        # crop the image
+                        x, y, w, h = roir
+                        if self.bFlagCropRectifImages:
+                            dst = dst[y:y+h, x:x+w]
 
-                    # crop the image
-                    x, y, w, h = roi
-                    if self.bFlagCropRectifImages:
-                        dst = dst[y:y+h, x:x+w]
                         
                     # Append rectified image to list 
                     rect_img_list.append(dst)
@@ -501,9 +571,10 @@ class StereoCalibrator:
                 frameToDisplay = cv.hconcat([rect_img_list[0], rect_img_list[1]])
                 # Number of evenly spaced horizontal lines             
                 nrLines = 20
-                enableDrawVerticalLines = True
+                enableDrawHorizontalLines = True
 
-                if enableDrawVerticalLines:
+                # If enabled -> Draw horizontal lines to visually check row alignment
+                if enableDrawHorizontalLines:
                     lineDistance= h/nrLines
                     (h, w) = frameToDisplay.shape
                     for line in range(nrLines):
@@ -511,12 +582,14 @@ class StereoCalibrator:
                         line_thickness = 1
                         cv.line(frameToDisplay, (0, lineY), (w, lineY), (0, 255, 0), thickness=line_thickness)
                     
-                disparity_image = self._computeDepthMap(rect_img_list[0], rect_img_list[1]) 
-                # Print status
                 fileName = str(iIndex) + '_rectified'
-                fileNameDispMap = str(iIndex) + '_dispMap'
                 cv.imwrite(os.path.join(self.sRecifiedImgPath , fileName+".png"), frameToDisplay)
-                cv.imwrite(os.path.join(self.sDisparityMapsPath , fileNameDispMap+".png"), disparity_image)
+
+                if self.bEnableCreateDispMapsFromCalibImgs:
+                    disparity_image = self._computeDepthMap(rect_img_list[0], rect_img_list[1]) 
+                    fileNameDispMap = str(iIndex) + '_dispMap'
+                    cv.imwrite(os.path.join(self.sDisparityMapsPath , fileNameDispMap+".png"), disparity_image)
+
                 iIndex = iIndex + 1
         else:
             self.log.pLogErr('Rectification aborted. No calibration data.')
@@ -554,7 +627,10 @@ class StereoCalibrator:
                                 None,
                                 None,
                                 criteria=CalibCritera)
-            
+
+        self.log.pLogMsg(' ')
+        self.log.pLogMsg(' [MONO CALIBRATE] ==> [Right CAM]')
+        self.log.pLogMsg(' ')
         (   right_success,
             self.RightCamera.Kmat,
             self.RightCamera.Dvec,
@@ -607,8 +683,6 @@ class StereoCalibrator:
                 yy = self.objectSize / 2
             else:
                 yy = 0
-                
-        TBD=True
         
     def _createChessboardObjectPoints(self):
         self.objp = np.zeros((self.boardSize[1]*self.boardSize[0], 3), np.float32)
@@ -731,17 +805,28 @@ class StereoCalibrator:
     def _calculateTotalReprojErrorPerImage(self):
         for ii, imageData in enumerate( self.aImageList ):
             if imageData.isPatternFound == True:
-                imgpoints2_left, _ = cv.projectPoints(   self.objp,
-                                                        imageData.left_rvec,
-                                                        imageData.left_tvec,
-                                                        self.stereoCalibData.K1,
-                                                        self.stereoCalibData.D1)
+                # rvecs and tvecs should actually be computed by cv.stereoCalibrate. For some reason
+                # that is beyond me that only seems to be an option in the cpp version and not with 
+                # python (at least without touching the underlying cpp code). Hence this workaround for now.
+                (retval, rvec_l, tvec_l,inliers) = cv.solvePnPRansac(self.objp, 
+                                                                    imageData.leftImagePoints, 
+                                                                    self.stereoCalibData.K1, 
+                                                                    self.stereoCalibData.D1)
+                imgpoints2_left, _ = cv.projectPoints(self.objp,
+                                                    rvec_l,
+                                                    tvec_l,
+                                                    self.stereoCalibData.K1,
+                                                    self.stereoCalibData.D1)
                 
-                imgpoints2_right, _ = cv.projectPoints(   self.objp,
-                                                        imageData.right_rvec,
-                                                        imageData.right_tvec,
-                                                        self.stereoCalibData.K2,
-                                                        self.stereoCalibData.D2)
+                (retval, rvec_r, tvec_r,inliers) = cv.solvePnPRansac(self.objp, 
+                                                                    imageData.rightImagePoints, 
+                                                                    self.stereoCalibData.K2, 
+                                                                    self.stereoCalibData.D2)
+                imgpoints2_right, _ = cv.projectPoints(self.objp,
+                                                    rvec_r,
+                                                    tvec_r,
+                                                    self.stereoCalibData.K2,
+                                                    self.stereoCalibData.D2)
                 error_left = cv.norm(imageData.leftImagePoints,
                                 imgpoints2_left,
                                 cv.NORM_L2)/len(imgpoints2_left)
@@ -757,25 +842,29 @@ class StereoCalibrator:
                 minErrorPerImage  = np.min( np.array( reprojErrorArray_left ) )
                 sdtvErrorPerImage = np.std( np.array(reprojErrorArray_left) )
                 
-                self.aImageList[ii].reprojErrorArray        = reprojErrorArray_left
+                self.aImageList[ii].reprojErrorArray_left   = reprojErrorArray_left
                 self.aImageList[ii].averageReprojError_left = error_left
                 self.aImageList[ii].maxReprojError_left     = maxErrorPerImage
                 self.aImageList[ii].minReprojError_left     = minErrorPerImage
                 self.aImageList[ii].stdReprojError_left     = sdtvErrorPerImage
+                self.aImageList[ii].reprojImgPoints_left    = imgpoints2_left
                 
-                maxErrorPerImage  = np.max( np.array( reprojErrorArray_right  ) )
-                minErrorPerImage  = np.min( np.array( reprojErrorArray_right ) )
+                maxErrorPerImage  = np.max( np.array(reprojErrorArray_right) )
+                minErrorPerImage  = np.min( np.array(reprojErrorArray_right) )
                 sdtvErrorPerImage = np.std( np.array(reprojErrorArray_right) )
                 
-                self.aImageList[ii].reprojErrorArray         = reprojErrorArray_right
-                self.aImageList[ii].averageReprojError_right = error_right
-                self.aImageList[ii].maxReprojError_left      = maxErrorPerImage
-                self.aImageList[ii].minReprojError_left      = minErrorPerImage
-                self.aImageList[ii].stdReprojError_left      = sdtvErrorPerImage
+                self.aImageList[ii].reprojErrorArray_right    = reprojErrorArray_right
+                self.aImageList[ii].averageReprojError_right  = error_right
+                self.aImageList[ii].maxReprojError_right      = maxErrorPerImage
+                self.aImageList[ii].minReprojError_right      = minErrorPerImage
+                self.aImageList[ii].stdReprojError_right      = sdtvErrorPerImage
+                self.aImageList[ii].reprojImgPoints_right     = imgpoints2_right
 
     # Function create terminal print out with average reprojection error per valid calibration image
     def _showReprojectionError(self):
         self.log.pLogMsg("Reprojection error per image:")
+        self.log.pLogMsg(self._createLineSeparator())
+
         self._calculateTotalReprojErrorPerImage()
         aListReprojError_left   = self._returnAveragReprojErrPerImage("left")
         aListReprojError_right  = self._returnAveragReprojErrPerImage("right")
@@ -802,6 +891,7 @@ class StereoCalibrator:
                                  +' , max  '+'{:.5f}'.format(imageData.maxReprojError_right)
                                  +' , std  '+'{:.5f}'.format(imageData.stdReprojError_right)
                                 )
+                self.log.pLogMsg(self._createLineSeparator())
     # Function to create string to visualize reprojection error 
     # e.g. |======    |
     #      |==        |
@@ -826,12 +916,57 @@ class StereoCalibrator:
     
     # Functions returns a list of average reprojection error per image - only for
     # the valid images!   
-    def _returnAveragReprojErrPerImage(self, camera):
+    def _returnAveragReprojErrPerImage(self, sCameraId):
         averageReprojList = []
         for imageData in self.aImageList:
             if imageData.isPatternFound == True:
-                if camera is "left":   
+                if sCameraId == "left":   
                     averageReprojList.append(imageData.averageReprojError_left)
-                else:
+                elif sCameraId == 'right':
                     averageReprojList.append(imageData.averageReprojError_right)
+                else:
+                    self.pLogErr('sCameraId not valid.')
         return averageReprojList
+
+    def _createLineSeparator(self):
+        # Number of characters to match:
+        cCount =  133
+        sOut   = ''
+        for iCounter in range(cCount):
+            sOut = sOut + "-"
+        return sOut
+
+    def _createLargeSeparator(self):
+        # Number of characters to match:
+        cCount =  133
+        sOut   = ''
+        for iCounter in range(cCount):
+            sOut = sOut + "="
+        return sOut
+
+    def drawReprojectedCornerPoints(self):
+
+        self.log.pLogMsg('Save images with reprojected corner points: ')
+        for iCounter, imageData in tqdm(enumerate(self.aImageList)):
+
+            imgPointsLeft  = imageData.reprojImgPoints_left
+            imgPointsRight = imageData.reprojImgPoints_right
+
+            imgl_c = cv.cvtColor(imageData.rawLeftImg, cv.COLOR_GRAY2BGR)
+            imgr_c = cv.cvtColor(imageData.rawRightImg, cv.COLOR_GRAY2BGR)
+
+            cv.drawChessboardCorners(imgl_c,
+                                        self.boardSize,
+                                        imgPointsLeft,
+                                        True)
+            cv.drawChessboardCorners(imgr_c,
+                                        self.boardSize,
+                                        imgPointsRight,
+                                        True)
+
+            fileName = str(iCounter) + '_check.png'
+            # TODO: If this turns out to be a useful feature there should be a dedicated folder to save the images 
+            #       to. In any case the DisparityMap folder is only a dirty, temporary solution.ß
+            savePath = self.sDisparityMapsPath + fileName
+            dual_image = cv.hconcat([imgl_c, imgl_c])
+            cv.imwrite(savePath, dual_image)
