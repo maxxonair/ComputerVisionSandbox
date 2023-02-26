@@ -11,6 +11,7 @@ from tqdm import tqdm
 import glob
 import numpy as np
 import os
+import math
 
 from util.CameraMetaData import CameraData
 from util.CalibImageData import CalibImageData
@@ -49,7 +50,7 @@ class StereoCalibrator:
     scale_percent = 100
 
     # Chessboard pattern dimension
-    # ( rows, columns)
+    # (rows, columns)
     boardSize = (0, 0)
 
     # Number of images in input set
@@ -363,17 +364,17 @@ class StereoCalibrator:
             self.log.pLogErr(
                 "List of valid stereo image pairs (pattern found) is empty. Exiting.")
             return False
-            
+
         stereoCalibFlags = ( cv.CALIB_FIX_ASPECT_RATIO + 
                             cv.CALIB_ZERO_TANGENT_DIST +
                             cv.CALIB_USE_INTRINSIC_GUESS +
                             cv.CALIB_SAME_FOCAL_LENGTH +
                             cv.CALIB_FIX_PRINCIPAL_POINT )
                             # cv.CALIB_RATIONAL_MODEL +
-                            # cv.CALIB_FIX_K3 + 
-                            # cv.CALIB_FIX_K4 + 
-                            # cv.CALIB_FIX_K5)
-
+        #                     # cv.CALIB_FIX_K3 + 
+        #                     # cv.CALIB_FIX_K4 + 
+        #                     # cv.CALIB_FIX_K5)   
+        
         (flagStereoCalibrationSucceeded, 
          self.stereoCalibData.K1, 
          self.stereoCalibData.D1, 
@@ -551,14 +552,14 @@ class StereoCalibrator:
                     # cv.CV_32FC1
                     if index == 0:
                         # Remap left image
-                        dst = cv.remap(image, self.lmapx, self.lmapy, cv.INTER_LANCZOS4)
+                        dst = cv.remap(image, self.lmapx, self.lmapy, cv.INTER_LANCZOS4, cv.BORDER_CONSTANT)
                         # crop the image
                         x, y, w, h = roil
                         if self.bFlagCropRectifImages:
                             dst = dst[y:y+h, x:x+w]
                     else:
                         # Remap right image 
-                        dst = cv.remap(image, self.rmapx, self.rmapy, cv.INTER_LANCZOS4)
+                        dst = cv.remap(image, self.rmapx, self.rmapy, cv.INTER_LANCZOS4, cv.BORDER_CONSTANT)
                         # crop the image
                         x, y, w, h = roir
                         if self.bFlagCropRectifImages:
@@ -605,6 +606,11 @@ class StereoCalibrator:
         # ----------------------------------------------------------------------
         # run (Mono) Camera calibration
         # ----------------------------------------------------------------------
+        self.log.pLogMsg(self._createLargeSeparator())
+        self.log.pLogMsg("")
+        self.log.pLogMsg("[RUN MONO CALIBRATION]")
+        self.log.pLogMsg("")
+        self.log.pLogMsg(self._createLargeSeparator())
         CalibCritera = (cv.TERM_CRITERIA_EPS +
             cv.TERM_CRITERIA_MAX_ITER, 300, 1e-6)
         
@@ -662,6 +668,12 @@ class StereoCalibrator:
         self.log.pLogMsg("")
         self.log.pLogMsg("[RIGHT CAM] Distortion Coefficients: "+str(self.RightCamera.Dvec))
         self.log.pLogMsg("")
+                # Append summary of processed stereo bench properties:
+        self.log.pLogMsg("[LEFT  CAM] Calibrated FoV in x [deg]: {}".format(math.degrees(2*np.arctan(self.imageSize[0]/(2*self.LeftCamera.Kmat[0,0])))))
+        self.log.pLogMsg("[LEFT  CAM] Calibrated FoV in y [deg]: {}".format(math.degrees(2*np.arctan(self.imageSize[1]/(2*self.LeftCamera.Kmat[1,1])))))
+        self.log.pLogMsg("")
+        self.log.pLogMsg("[RIGHT CAM] Calibrated FoV in x [deg]: {}".format(math.degrees(2*np.arctan(self.imageSize[0]/(2*self.RightCamera.Kmat[0,0])))))
+        self.log.pLogMsg("[RIGHT CAM] Calibrated FoV in y [deg]: {}".format(math.degrees(2*np.arctan(self.imageSize[1]/(2*self.RightCamera.Kmat[1,1])))))
       
     def _createAcircleObjectPoints(self):
         xx = 0

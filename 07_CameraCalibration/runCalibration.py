@@ -197,7 +197,8 @@ def main():
     if calibrationMode == "stereo":
         # Stereo set 
         # raw_img_path = "/Users/MrX/Documents/003_Tools/42_ImageProcessing/07_CameraCalibration/_camera_01_02_stereo_calibration/_raw_images/2022_20_09_Oct_10_1665307240_frame_capture/"
-        raw_img_path= './_stereoBench_calibration_20_02_2023/01_raw_calibration_imgs/'
+        # raw_img_path= './_stereoBench_calibration_20_02_2023/01_raw_calibration_imgs/'
+        raw_img_path = '../09_Perception/01_PerceptionPlayground/output/2023_02_26_21_11_16_frame_capture/'
         inputFilePath = raw_img_path
         # Initialize stereo calibration instance 
         calibrator = StereoCalibrator(inputFilePath, 
