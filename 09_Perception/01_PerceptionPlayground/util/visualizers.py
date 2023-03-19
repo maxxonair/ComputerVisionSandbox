@@ -101,15 +101,15 @@ def plotDisparityMap(imgl, imgr, dispMap, depthMap, enableSaveToFile):
     ax2.grid(linestyle='-', linewidth=GRID_LINE_THICKNESS)
 
     ax3 = plt.subplot(2,2,3)
-    ax3.set_title('Disparity Map')
+    ax3.set_title('Disparity Map Raw')
     dispPlot = ax3.imshow(dispMap, cmap='inferno', vmin=0, vmax=255)
     ax3.set_xlabel("x / px")
     ax3.set_ylabel("y / px")  
     bar = plt.colorbar(dispPlot)
 
     ax4 = plt.subplot(2,2,4)
-    ax4.set_title('Depth Map')
-    depthPlot = ax4.imshow(depthMap, cmap='inferno_r', vmax=5)
+    ax4.set_title('Disparity Map Filtered')
+    depthPlot = ax4.imshow(depthMap, cmap='inferno_r', vmin=0, vmax=255)
     ax4.set_xlabel("x / px")
     ax4.set_ylabel("y / px")  
     bar = plt.colorbar(depthPlot)

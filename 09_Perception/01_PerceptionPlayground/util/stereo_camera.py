@@ -15,6 +15,37 @@ imgWindowName = "StereoBench camera image feed [.mk0]"
 SHOW_MODE_DISPARITY_MAP = 1
 SHOW_MODE_RECTIFIED     = 2
 SHOW_MODE_RAW_IMG       = 3
+SHOW_MODE_LAPLCE_IMG    = 4
+
+def captureStereoImagePair():
+  # [!] Left stereo bench camera port ID
+  cam01_port = 0
+  # [!] Rigth stereo bench camera port ID
+  cam02_port = 1
+
+  print(' [Open camera interfaces]')
+  print()
+  # Open Video capture for both cameras
+  leftCamInterface  = cv.VideoCapture(cam01_port)
+  rightCamInterface = cv.VideoCapture(cam02_port)
+
+  # Check if both webcams have been opened correctly
+  if not leftCamInterface.isOpened():
+    raise IOError("Cannot open webcam 01")
+  if not rightCamInterface.isOpened():
+    raise IOError("Cannot open webcam 02")
+  
+  (suc1, imgl, suc2, imgr, timetag_ms) = _acquireStereoImagePair(leftCamInterface, 
+                                                                rightCamInterface, 
+                                                                False)
+
+  if suc1 and suc2: 
+    return imgl, imgr
+  else:
+    print('Image capture failed.')
+    imgl = []
+    imgr = []
+    return imgl, imgr
 
 
 def startStreaming(undist_maps, showProduct):
@@ -43,6 +74,8 @@ def startStreaming(undist_maps, showProduct):
     showMode   = SHOW_MODE_RECTIFIED
   elif showProduct == 'dispmap':
     showMode   = SHOW_MODE_DISPARITY_MAP
+  elif showProduct == 'laplace':
+    showMode   = SHOW_MODE_LAPLCE_IMG
   else:
     print('ERROR: showProduct not recognized. Using default show raw images.')
     showMode   = SHOW_MODE_RAW_IMG
@@ -96,6 +129,14 @@ def startStreaming(undist_maps, showProduct):
         elif showMode == SHOW_MODE_RAW_IMG:
           imgToShow = cv.hconcat([imgl, imgr])
           imgToShow = cv.resize(imgToShow, (1200,600), interpolation=cv.INTER_AREA)
+        elif showMode == SHOW_MODE_LAPLCE_IMG:
+          kernel_size = 5
+          # Rectify camera images 
+          (rimgl, rimgr) = img.rectifyStereoImageSet(imgl, imgr, undist_maps)
+          # Laplace transform rectified image pair 
+          (rimgl, rimgr) = _laplaceTransformStereoPair(rimgl, rimgr, kernel_size)
+          # Show image
+          imgToShow = cv.hconcat([rimgl, rimgr])
         else:
           print("[ERR] Error showMode not valid. Exiting")
           break
@@ -183,3 +224,9 @@ def _createGrabTimingHistogram(grabDiffList, pngFilePath):
   plt.title('Stereo camera session: Grab frame difference')
   plt.xlabel('Time between left and right frame [ms]')
   plt.savefig(pngFilePath)
+
+def _laplaceTransformStereoPair(limg, rimg, kernel_size):
+  ddepth = cv.CV_8U
+  limg = cv.Laplacian(limg, ddepth, ksize=kernel_size)
+  rimg = cv.Laplacian(rimg, ddepth, ksize=kernel_size)
+  return limg, rimg

@@ -34,8 +34,8 @@ def createDisparityMap(rimgl, rimgr):
     )
     right_matcher = cv.ximgproc.createRightMatcher(left_matcher)
     # FILTER Parameters
-    lmbda = 80000
-    sigma = 1.3
+    lmbda = 15000 # 80000
+    sigma =  1.3
     visual_multiplier = 6
 
     wls_filter = cv.ximgproc.createDisparityWLSFilter(matcher_left=left_matcher)
