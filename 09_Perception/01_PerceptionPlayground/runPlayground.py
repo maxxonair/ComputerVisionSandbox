@@ -15,34 +15,46 @@ import cv2 as cv
 import util.io_functions as io
 import util.image_functions as img
 import util.visualizers as show
-import util.stereo_camera as camera
+from util.stereo_camera import StereoCamera
 import util.ephemeris_interface as eph
 
 from util.sun_finder import SunDetector
 from util.imu_interface import ImuConnector 
+
+from util.ChartClasses.MonitorChart import MonitorChart
 
 from util.PyLog import PyLog
 # -----------------------------------------------------------------------------------------------------------
 #               [PLAY MODE]
 # -----------------------------------------------------------------------------------------------------------
 # Define allowable playmodes 
-PM_STREAM_FROM_CAM              = 1
-PM_STATIC_STEREO_TEST_FROM_IMG  = 2
-PM_SUN_GAZING_TEST              = 3
+PM_STREAM_FROM_CAM                  = 1
+PM_STATIC_STEREO_TEST_FROM_IMG      = 2
+PM_SUN_GAZING_TEST                  = 3
+PM_PATTERN_DETECTION_STATIC_TEST    = 4
+PM_PATTERN_DETECTION_STREAMING_TEST = 5
 
 # [!] Define play mode 
-playMode = PM_SUN_GAZING_TEST
+playMode = PM_PATTERN_DETECTION_STREAMING_TEST
+
+# Img index (asset/01_input_images/) for static tests
+testIndex = 12
 
 # Create and start streaming from stereo camera
 # streamingMode options: rawimg, rectimg, dispmap, laplace
-streamingMode = 'laplace'
+streamingMode = 'rawimg'
+
+boardDimensions = (7,12)
 # -----------------------------------------------------------------------------------------------------------
+log = PyLog()
+
+camera = StereoCamera(log)
 # [Define file paths]
 sCalibrationMatricesFilePath  = os.path.join('assets','02_camera_calibration','stereo_calibration.yaml')
 sLeftUndistortionMapFilePath  = os.path.join('assets','02_camera_calibration','caml_undistortion_map.tiff')
 sRightUndistortionMapFilePath = os.path.join('assets','02_camera_calibration','camr_undistortion_map.tiff')
 
-testIndex = 2
+
 sTestImageFilePath = os.path.join('assets',
                                   '01_input_images','img_'+str(testIndex)+'.png')
 
@@ -50,16 +62,19 @@ sTestImageFilePath = os.path.join('assets',
 enableLaplacianTransform = True
 
 # [Load camera calibration matrices]
-cam_calibration = io.loadCalibrationParameters(sCalibrationMatricesFilePath)
+log.pLogMsg('    [Load stereo camera calibration parameters]')
+cam_calibration = io.loadCalibrationParameters(sCalibrationMatricesFilePath, log)
 
 # [Load undistortion maps]
-undist_maps = io.loadStereoUndistortionMaps(sLeftUndistortionMapFilePath, sRightUndistortionMapFilePath)
+log.pLogMsg('    [Load stereo camera undistortion maps]')
+undist_maps = io.loadStereoUndistortionMaps(sLeftUndistortionMapFilePath, sRightUndistortionMapFilePath, log)
 # -----------------------------------------------------------------------------------------------------------
-log = PyLog()
-
+log.pLogMsg('')
+log.pLogMsg('[Start Test]')
+log.pLogMsg('')
 # [Load raw stereo images]
 if playMode == PM_STREAM_FROM_CAM:
-    camera.startStreaming(undist_maps, streamingMode)
+    camera.startStreaming(undist_maps, streamingMode, True)
 elif playMode == PM_STATIC_STEREO_TEST_FROM_IMG :
     (imgl, imgr) = io.loadStereoImage(sTestImageFilePath)
 
@@ -104,6 +119,42 @@ elif playMode == PM_STATIC_STEREO_TEST_FROM_IMG :
 
     if enableShowDisparityMap:
         show.plotDisparityMap(rimgl, rimgr, rawDispMap, dispMapFiltered, enableSaveToFile)
+elif playMode == PM_PATTERN_DETECTION_STATIC_TEST :
+    # [Load image from file]
+    log.pLogMsg(f'Load stereo image: {sTestImageFilePath}')
+    (imgl, imgr) = io.loadStereoImage(sTestImageFilePath)
+
+    # [Rectify raw images]
+    (rimgl, rimgr) = img.rectifyStereoImageSet(imgl, imgr, undist_maps)
+    
+    cv.imwrite('./output/test.png', cv.hconcat([rimgl, rimgr]))
+    
+    # [Create monitor instance] 
+    monitor = MonitorChart(boardDimensions, 
+                           cam_calibration['R2'], 
+                           cam_calibration['T'], 
+                           undist_maps,
+                           log)
+    
+    monitor._compPatternWorldPoints(rimgl, rimgr)
+    
+    monitor.run()
+    
+elif playMode == PM_PATTERN_DETECTION_STREAMING_TEST :
+    
+    # [Create monitor instance] 
+    monitor = MonitorChart(boardDimensions, 
+                           cam_calibration['R2'], 
+                           cam_calibration['T'], 
+                           undist_maps,
+                           log)
+    
+    # Chart refresh interval [seconds]
+    refreshInterval_s = 0.5
+    
+    # Start live monitor
+    monitor.monitor(refreshInterval_s)
+    
 elif playMode == PM_SUN_GAZING_TEST:
     log.pLogMsg('|                 [Detection Test]                 |')
 
@@ -147,7 +198,33 @@ elif playMode == PM_SUN_GAZING_TEST:
         
     # [CAMERA] Measure sun direction in camera frame
     sFinder = SunDetector()
-    sFinder.detect(rimgl, log)
+    isSunDetected, coordinates = sFinder.detect(rimgl, log)
+    
+    C = cam_calibration['K1']
+    
+    print(C)
+    
+    eyeMat = np.hstack((np.eye(3), np.zeros((3,1))))
+    
+    print(eyeMat)
+    
+    imgVec = [coordinates[0], coordinates[1], 0]
+    
+    PMat = np.array([[1,0,0,0],
+                     [0,1,0,0],
+                     [0,0,1,0],
+                     [0,0,0,1]])
+    
+    CMat = np.dot(np.dot(C, eyeMat), PMat)
+    CMat
+    print()
+    print(CMat)
+    print()
+    invCMat = np.linalg.inv(CMat)
+    
+    worldCoordinates = np.dot(invCMat, imgVec)
+    
+    log.pLogMsg(f'World coordinates: {worldCoordinates}')
     
     cv.imwrite('./output/test.png', sFinder.debugImg)
 

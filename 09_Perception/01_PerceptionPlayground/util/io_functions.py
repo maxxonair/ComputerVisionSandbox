@@ -14,9 +14,8 @@ def loadStereoImage(sStereoImgPath):
     return (imgl, imgr)
 
 
-def loadCalibrationParameters(sCalibrationParameterDirectory_in):
+def loadCalibrationParameters(sCalibrationParameterDirectory_in, log):
 
-    print('[LOAD] Stereo camera calibration data set.')
 
     fileStorage = cv.FileStorage()
     suc = fileStorage.open(sCalibrationParameterDirectory_in, cv.FileStorage_READ)
@@ -31,8 +30,8 @@ def loadCalibrationParameters(sCalibrationParameterDirectory_in):
     T=[]
     Q=[]
 
-    if suc:
-        
+    if suc: 
+        log.pLogMsg('[x] Stereo camera calibration data set loaded.')
         K1 = fileStorage.getNode('K1').mat()
         D1 = fileStorage.getNode('D1').mat()
         K2 = fileStorage.getNode('K2').mat()
@@ -66,18 +65,15 @@ def loadCalibrationParameters(sCalibrationParameterDirectory_in):
 def saveArrayAsCsv(array_in, sFilePath_in):
     np.savetxt(sFilePath_in, array_in, delimiter=",")
 
-def loadStereoUndistortionMaps(sLeftUndistortionMapFilePath, sRightUndistortionMapFilePath):
-    
-    print('[LOAD] Stereo camera undistortion maps.')
-
+def loadStereoUndistortionMaps(sLeftUndistortionMapFilePath, sRightUndistortionMapFilePath, log):
     stacked = cv.imread(sLeftUndistortionMapFilePath, cv.IMREAD_UNCHANGED)
     
     # Check file has been found and loaded before moving on 
     if stacked is None:
-        print('[ERR] Left camera undistortion map not found! Exiting')
+        log.pLogErr('[ERR] Left camera undistortion map not found! Exiting')
         exit(1)  
     else:
-        print('Left camera undistortion map has been found and loaded.')
+        log.pLogMsg('[x] Left camera undistortion map has been found and loaded.')
         
     mapx = stacked[:,:,0:2].astype(np.int16)
     mapy = stacked[:,:,2]
@@ -88,10 +84,10 @@ def loadStereoUndistortionMaps(sLeftUndistortionMapFilePath, sRightUndistortionM
     
     # Check file has been found and loaded before moving on 
     if stackedr is None:
-        print('[ERR] Left camera undistortion map not found! Exiting')
+        log.pLogErr('[ERR] Left camera undistortion map not found! Exiting')
         exit(1) 
     else:
-        print('Right camera undistortion map has been found and loaded.')
+        log.pLogMsg('[x] Right camera undistortion map has been found and loaded.')
         
     mapx = stackedr[:,:,0:2].astype(np.int16)
     mapy = stackedr[:,:,2]
