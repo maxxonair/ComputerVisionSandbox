@@ -10,6 +10,7 @@ import matplotlib
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+
 import threading
 
 import numpy as np
@@ -17,6 +18,28 @@ import cv2 as cv
 
 from util.stereo_camera import StereoCamera
 import util.image_functions as img
+
+from matplotlib.patches import FancyArrowPatch
+from mpl_toolkits.mplot3d import proj3d
+
+
+class Arrow3D(FancyArrowPatch):
+    def __init__(self, xs, ys, zs, *args, **kwargs):
+        FancyArrowPatch.__init__(self, (0, 0), (0, 0), *args, **kwargs)
+        self._verts3d = xs, ys, zs
+
+    def draw(self, renderer=None):
+        xs3d, ys3d, zs3d = self._verts3d
+        xs, ys, zs = proj3d.proj_transform(xs3d, ys3d, zs3d, self.axes.M)
+        self.set_positions((xs[0], ys[0]), (xs[1], ys[1]))
+        FancyArrowPatch.draw(self, renderer)
+
+    def do_3d_projection(self, renderer=None):
+        xs3d, ys3d, zs3d = self._verts3d
+        xs, ys, zs = proj3d.proj_transform(xs3d, ys3d, zs3d, self.axes.M)
+        self.set_positions((xs[0],ys[0]),(xs[1],ys[1]))
+
+        return np.min(zs)
 
 class MonitorChart:
 
@@ -74,6 +97,7 @@ class MonitorChart:
     
   def _compPatternWorldPoints(self, rimgl, rimgr):
     (w,h) = rimgl.shape
+    self.worldPoints_m_Cam = []
     
     self.rimg = cv.hconcat([rimgl, rimgr])
     
@@ -109,9 +133,11 @@ class MonitorChart:
     
     #----------------------------------------------------------
     #           [Data charts]
-    #----------------------------------------------------------
+    #==========================================================
     self.ax1.clear()
     self.ax3D.clear()
+    #-------------------------------------------
+
     # If pattern data is available -> Draw it on the displayed image
     if self.suc1 and self.suc2:
       cimgl = self._drawChessboardOnImage(self.gimgl, self.imgPointsl)
@@ -121,7 +147,8 @@ class MonitorChart:
     else:
       # If not -> only show the image itself
       self.ax1.imshow(self.rimg, cmap='gray')
-      
+    #-------------------------------------------
+
     if len(self.worldPoints_m_Cam) != 0:
       try:
         self.ax3D.scatter(self.worldPoints_m_Cam[:,0],
@@ -131,13 +158,38 @@ class MonitorChart:
         print('Plotting world points failed')
     else:
       print('No pattern detected in image frame')
-    #----------------------------------------------------------
+    #==========================================================
     minValCameraFrame = -0.5
     maxValCameraFrame =  2
-    self.ax1.set_title('Monitor test')
+
+    # Set chart titles
+    self.ax1.set_title('[stereo camera image]')
+    self.ax3D.set_title('[corner points in left camera frame]')
+
+    # Set 3D chart axis names
     self.ax3D.set_xlabel('x / m')
     self.ax3D.set_ylabel('y / m')
     self.ax3D.set_zlabel('z / m')
+
+    # Here we create the arrows:
+    arrow_prop_dict = dict(mutation_scale=20, arrowstyle='->', shrinkA=0, shrinkB=0)
+
+    a = Arrow3D([0, 1], [0, 0], [0, 0], **arrow_prop_dict, color='r')
+    self.ax3D.add_artist(a)
+    a = Arrow3D([0, 0], [0, 1], [0, 0], **arrow_prop_dict, color='b')
+    self.ax3D.add_artist(a)
+    a = Arrow3D([0, 0], [0, 0], [0, 1], **arrow_prop_dict, color='g')
+    self.ax3D.add_artist(a)
+
+    # Give them a name:
+    self.ax3D.text(0.0, 0.0, -0.1, r'$0$')
+    self.ax3D.text(1.1, 0, 0, r'$x$')
+    self.ax3D.text(0, 1.1, 0, r'$y$')
+    self.ax3D.text(0, 0, 1.1, r'$z$')
+
+    self.ax3D.view_init(elev=-40.0, azim=-90.0)
+
+    # Set 3D chart axis limits
     self.ax3D.axes.set_xlim3d(left=minValCameraFrame, right=maxValCameraFrame)
     self.ax3D.axes.set_ylim3d(bottom=minValCameraFrame, top=maxValCameraFrame) 
     self.ax3D.axes.set_zlim3d(bottom=minValCameraFrame, top=maxValCameraFrame) 
@@ -151,7 +203,10 @@ class MonitorChart:
     # [Capture stereo image from camera]
     if not self.isStreamingStarted:
       streamingMode = 'rawimg'
-      self.streamingThread = threading.Thread(target=self.camera.startStreaming, name="Stream", args=(self.undistMaps, streamingMode, False))
+      # Start stereo camera stream in separate thread
+      self.streamingThread = threading.Thread(target=self.camera.startStreaming, 
+                                              name="Stream", 
+                                              args=(self.undistMaps, streamingMode, False))
       self.streamingThread.start()
       self.isStreamingStarted = True
 
