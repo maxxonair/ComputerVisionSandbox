@@ -18,6 +18,7 @@ import cv2 as cv
 
 from util.stereo_camera import StereoCamera
 import util.image_functions as img
+from util.ChartClasses.CoordinateSystem import Frame
 
 from matplotlib.patches import FancyArrowPatch
 from mpl_toolkits.mplot3d import proj3d
@@ -45,11 +46,10 @@ class MonitorChart:
 
   worldPoints_m_Cam  = []
   
-  def __init__(self, boardDimensions, R_mat, T_mat, undistMaps, log):
+  def __init__(self, boardDimensions, CameraCalibration, undistMaps, log):
     
-    # Compose projection matrices 
-    self.P1 = np.hstack((np.eye(3, dtype=float), np.zeros((3,1), dtype=float)))
-    self.P2 = np.hstack((R_mat, T_mat))
+    # Compose projection matricesƒ ƒ
+    self.CameraCalibration = CameraCalibration
     self.boardSize  = boardDimensions
     self.undistMaps = undistMaps
     self.log        = log
@@ -57,6 +57,10 @@ class MonitorChart:
     self.camera = StereoCamera(log)
     
     self.isStreamingStarted = False
+    
+    self.camera_frame = Frame()
+
+    self.isSetAxesOrientation = False
 
     self.fig  = plt.figure(figsize=(20, 10))
     self.ax1  = self.fig.add_subplot(1,2,1)
@@ -108,12 +112,35 @@ class MonitorChart:
       #  Normalize image points
       self.normImgPointsl = self.imgPointsl / w
       self.normImgPointsr = self.imgPointsr / w
+
+      self.P1 = np.hstack((np.eye(3, dtype=float), np.zeros((3,1), dtype=float)))
+      # Decompose calibration projection matrices 
+      K1,R1,homT1, _, _, _, _ = cv.decomposeProjectionMatrix(self.CameraCalibration['P1'])
+      K2,R2,homT2, _, _, _, _ = cv.decomposeProjectionMatrix(self.CameraCalibration['P2'])
+
+      # Transform translation vector from homogeneous to inhomogeneous coordinates
+      T1 = (homT1[:3] / homT1[-1])[:3]
+      T2 = (homT2[:3] / homT2[-1])[:3]
+
+      # Normalize intrinsic matrices 
+      row_sums = K1.sum(axis=1)
+      normK1 = K1 / row_sums[:, np.newaxis]
+      row_sums = K2.sum(axis=1)
+      normK2 = K2 / row_sums[:, np.newaxis]
+
+      # Build [R|T] for left and right camera
+      RT1 = np.hstack((R1, T1), dtype=float)
+      RT2 = np.hstack((R2, T2), dtype=float)
+
+      # Compose semi-normalised projection matrices for left and right camera
+      P1 = np.dot(normK1, RT1)
+      P2 = np.dot(normK2, RT2)
       
       # Triangulate stereo image points to world points
-      homogeneusWorldPoints = cv.triangulatePoints(self.P1, 
-                                                    self.P2, 
-                                                    self.normImgPointsl, 
-                                                    self.normImgPointsr)
+      homogeneusWorldPoints = cv.triangulatePoints(P1, 
+                                                   P2, 
+                                                   self.normImgPointsl, 
+                                                   self.normImgPointsr)
       
       # Transform homogenous to inhomogenous coordinates
       (w, numCorners) = homogeneusWorldPoints.shape
@@ -125,7 +152,7 @@ class MonitorChart:
         
       self.worldPoints_m_Cam = np.zeros((numCorners,3), dtype=float)
       for iCounter in range(numCorners):
-        self.worldPoints_m_Cam[iCounter,:] = (homogeneusWorldPoints[:3, iCounter] / homogeneusWorldPoints[3, iCounter]) 
+        self.worldPoints_m_Cam[iCounter,:] = (homogeneusWorldPoints[:3, iCounter] / - homogeneusWorldPoints[3, iCounter]) 
     
   def _createChart(self):
 
@@ -134,14 +161,17 @@ class MonitorChart:
     #----------------------------------------------------------
     #           [Data charts]
     #==========================================================
-    self.ax1.clear()
+    try:
+      self.ax1.clear()
+    except:
+      DoNothing = True
     self.ax3D.clear()
     #-------------------------------------------
 
     # If pattern data is available -> Draw it on the displayed image
     if self.suc1 and self.suc2:
-      cimgl = self._drawChessboardOnImage(self.gimgl, self.imgPointsl)
-      cimgr = self._drawChessboardOnImage(self.gimgr, self.imgPointsr)
+      cimgl = self._drawChessboardOnImage(self.rimgl, self.imgPointsl)
+      cimgr = self._drawChessboardOnImage(self.rimgr, self.imgPointsr)
       imgToShow = cv.hconcat([cimgl, cimgr])
       self.ax1.imshow(imgToShow, cmap='gray')
     else:
@@ -170,6 +200,8 @@ class MonitorChart:
     self.ax3D.set_xlabel('x / m')
     self.ax3D.set_ylabel('y / m')
     self.ax3D.set_zlabel('z / m')
+    
+    # self.ax1 = self.camera_frame.draw(self.ax1)
 
     # Here we create the arrows:
     arrow_prop_dict = dict(mutation_scale=20, arrowstyle='->', shrinkA=0, shrinkB=0)
@@ -187,13 +219,17 @@ class MonitorChart:
     self.ax3D.text(0, 1.1, 0, r'$y$')
     self.ax3D.text(0, 0, 1.1, r'$z$')
 
-    self.ax3D.view_init(elev=-40.0, azim=-90.0)
+    if self.isSetAxesOrientation:
+      self.isSetAxesOrientation = True
+      self.ax3D.view_init(elev=-40.0, azim=-90.0)
 
     # Set 3D chart axis limits
     self.ax3D.axes.set_xlim3d(left=minValCameraFrame, right=maxValCameraFrame)
     self.ax3D.axes.set_ylim3d(bottom=minValCameraFrame, top=maxValCameraFrame) 
     self.ax3D.axes.set_zlim3d(bottom=minValCameraFrame, top=maxValCameraFrame) 
     self.fig.tight_layout()
+    self.fig.canvas.draw()
+    self.fig.show()
     
   def run(self):
     # self.update for static image tests
@@ -232,17 +268,17 @@ class MonitorChart:
       self.imageSize = self.gimgl.shape[:2]
 
       # [Rectify raw images]
-      (rimgl, 
-       rimgr) = img.rectifyStereoImageSet(self.gimgl, 
+      (self.rimgl, 
+       self.rimgr) = img.rectifyStereoImageSet(self.gimgl, 
                                           self.gimgr, 
                                           self.undistMaps)
       
-      print(rimgl.shape)
-      self._compPatternWorldPoints(rimgl, rimgr)
+      print(self.rimgl.shape)
+      self._compPatternWorldPoints(self.rimgl, self.rimgr)
       self._createChart()
 
   def monitor(self, refreshInterval_s):
     self.MonitorAnimation = animation.FuncAnimation(self.fig, 
-                                             self.update, 
-                                             interval=refreshInterval_s*1000)
+                                                    self.update, 
+                                                    interval=refreshInterval_s*1000)
     plt.show()

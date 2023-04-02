@@ -41,10 +41,10 @@ playMode = PM_PATTERN_DETECTION_STREAMING_TEST
 testIndex = 12
 
 # Create and start streaming from stereo camera
-# streamingMode options: rawimg, rectimg, dispmap, laplace
 streamingMode = 'rawimg'
 
 boardDimensions = (7,12)
+# boardDimensions = (3,3)
 # -----------------------------------------------------------------------------------------------------------
 log = PyLog()
 
@@ -131,8 +131,7 @@ elif playMode == PM_PATTERN_DETECTION_STATIC_TEST :
     
     # [Create monitor instance] 
     monitor = MonitorChart(boardDimensions, 
-                           cam_calibration['R2'], 
-                           cam_calibration['T'], 
+                           cam_calibration, 
                            undist_maps,
                            log)
     
@@ -144,8 +143,7 @@ elif playMode == PM_PATTERN_DETECTION_STREAMING_TEST :
     
     # [Create monitor instance] 
     monitor = MonitorChart(boardDimensions, 
-                           cam_calibration['R2'], 
-                           cam_calibration['T'], 
+                           cam_calibration,
                            undist_maps,
                            log)
     
