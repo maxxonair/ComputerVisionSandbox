@@ -13,12 +13,15 @@ import matplotlib.animation as animation
 
 import threading
 
+import signal
+
 import numpy as np
 import cv2 as cv
 
 from util.stereo_camera import StereoCamera
 import util.image_functions as img
 from util.ChartClasses.CoordinateSystem import Frame
+import util.constants as cnst
 
 from matplotlib.patches import FancyArrowPatch
 from mpl_toolkits.mplot3d import proj3d
@@ -118,6 +121,19 @@ class MonitorChart:
       K1,R1,homT1, _, _, _, _ = cv.decomposeProjectionMatrix(self.CameraCalibration['P1'])
       K2,R2,homT2, _, _, _, _ = cv.decomposeProjectionMatrix(self.CameraCalibration['P2'])
 
+      # ---------------------------------------
+      # TODO: Remove this. Temporarily here for debugging and exploring.
+      # fx = K1[0,0]
+      # fy = K1[1,1]
+
+      # Fx_m = fx * cnst.C270_SENSOR_WIDTH_M / 600
+      # Fy_m = fy * cnst.C270_SENSOR_HEIGHT_M / 600
+
+      # self.log.pLogMsg(f'Fx [m]: {Fx_m}')
+      # self.log.pLogMsg(f'Fy [m]: {Fy_m}')
+      # ---------------------------------------
+
+
       # Transform translation vector from homogeneous to inhomogeneous coordinates
       T1 = (homT1[:3] / homT1[-1])[:3]
       T2 = (homT2[:3] / homT2[-1])[:3]
@@ -153,11 +169,11 @@ class MonitorChart:
       self.worldPoints_m_Cam = np.zeros((numCorners,3), dtype=float)
       for iCounter in range(numCorners):
         self.worldPoints_m_Cam[iCounter,:] = (homogeneusWorldPoints[:3, iCounter] / - homogeneusWorldPoints[3, iCounter]) 
-    
+
   def _createChart(self):
 
     self.ax3D.set_aspect('equal')
-    
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
     #----------------------------------------------------------
     #           [Data charts]
     #==========================================================
@@ -189,8 +205,11 @@ class MonitorChart:
     else:
       print('No pattern detected in image frame')
     #==========================================================
-    minValCameraFrame = -0.5
+    minValCameraFrame = -1.2
     maxValCameraFrame =  2
+
+    # Set callback on close event 
+    self.fig.canvas.mpl_connect('close_event', self._callbackOnWindowClose)
 
     # Set chart titles
     self.ax1.set_title('[stereo camera image]')
@@ -238,7 +257,7 @@ class MonitorChart:
   def update(self, iFrame):
     # [Capture stereo image from camera]
     if not self.isStreamingStarted:
-      streamingMode = 'rawimg'
+      streamingMode = 'calibration'
       # Start stereo camera stream in separate thread
       self.streamingThread = threading.Thread(target=self.camera.startStreaming, 
                                               name="Stream", 
@@ -273,7 +292,6 @@ class MonitorChart:
                                           self.gimgr, 
                                           self.undistMaps)
       
-      print(self.rimgl.shape)
       self._compPatternWorldPoints(self.rimgl, self.rimgr)
       self._createChart()
 
@@ -282,3 +300,7 @@ class MonitorChart:
                                                     self.update, 
                                                     interval=refreshInterval_s*1000)
     plt.show()
+
+  def _callbackOnWindowClose(self, event):
+    self.camera.exitStreaming()
+    self.streamingThread.join()

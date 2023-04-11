@@ -207,8 +207,18 @@ class StereoCalibrator:
         for ii, fname in tqdm( enumerate( self.dual_images ) ):
             # Load dual image
             img = cv.imread(fname)
-            # Convert image to greyscale
-            gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+
+            if img is None: 
+                self.log.pLogErr(f'Image loading returned: None')
+                self.log.pLogErr(f'Image path: {fname}')
+                exit(1)
+
+            # If input is not grayscale -> Convert image to greyscale
+            if(len(img.shape)<3):
+                gray = img
+            else:
+                gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+
             outputImage = gray
             outputColor = img
             
@@ -596,7 +606,33 @@ class StereoCalibrator:
             self.log.pLogErr('Rectification aborted. No calibration data.')
          
 
+    # Function: re-run calibration with revised inclusion setting based on 
+    #           reprojection errors achieved in previous iteration.
+    # Note: Has to be run after self.calibrate!
+    def recalibrate(self):
+        self.log.pLogMsg(' ')
+        self.log.pLogMsg(' [RECALIBRATE].')
+        self.log.pLogMsg(' ')
         
+        CalibCritera = (cv.TERM_CRITERIA_EPS +
+        cv.TERM_CRITERIA_MAX_ITER, 300, 1e-6)
+        # ----------------------------------------------------------------------
+        # run (Mono) Camera calibration
+        # ----------------------------------------------------------------------
+        if self.bFlagCalibrationComplete:
+            # Create Image and Object Point array from imageData
+            self._createImageAndObjectPointArray()
+            # Create camera calibration parameters
+            self.stereoCalibrate()
+                
+            # Distribute rvecs and tvecs to the respective imageData's
+            # for ii, index in enumerate( self.aImageListToObjPointList) :
+            #     self.aImageList[index].rvec = self.rvecs[ii]
+            #     self.aImageList[index].tvec = self.tvecs[ii]
+        else:
+            self.log.pLogMsg("")
+            self.log.pLogErr('Re-calibration failed (CalibrationComplete flag is False)')
+            self.log.pLogMsg("") 
     #---------------------------------------------------------------------------
     #
     #   [ Private Functions ]
@@ -814,6 +850,39 @@ class StereoCalibrator:
 
         return filteredImg
     
+    def discardReprojectionOutliers(self):
+        """
+        Discard image pair based on their summed reprojection error
+        """
+        self.log.pLogMsg("")
+        self.log.pLogMsg("Remove Outliers based on reprojection errors.")
+        self.log.pLogMsg("")
+        
+        # Init counter to count discarded images
+        counter  = 0
+        sigmaThr = 1
+        aListReprojError_left   = self._returnAveragReprojErrPerImage("left")
+        aListReprojError_right  = self._returnAveragReprojErrPerImage("right")
+        left_stdv = np.std(aListReprojError_left)
+        right_stdv = np.std(aListReprojError_right)
+        left_mean = np.mean(aListReprojError_left)
+        right_mean = np.mean(aListReprojError_right)
+        
+        leftThr  = left_mean  + sigmaThr * left_stdv
+        rightThr = right_mean + sigmaThr * right_stdv
+        
+        for ii, imageData in enumerate( self.aImageList ):
+            if ( imageData.isPatternFound == True 
+                and (imageData.averageReprojError_left > leftThr 
+                     or imageData.averageReprojError_right > rightThr))  :
+                # Reprojection Error above limits -> Remove from list of valid images
+                self.aImageList[ii].isPatternFound = False
+                # Print out move:
+                self.log.pLogMsg("Remove Image "+str(imageData.imageIndex))
+                counter = counter + 1
+        self.log.pLogMsg("A total of  "+str(counter)+" have been removed.") 
+        return counter  
+
     def _calculateTotalReprojErrorPerImage(self):
         for ii, imageData in enumerate( self.aImageList ):
             if imageData.isPatternFound == True:

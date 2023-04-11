@@ -41,7 +41,8 @@ playMode = PM_PATTERN_DETECTION_STREAMING_TEST
 testIndex = 12
 
 # Create and start streaming from stereo camera
-streamingMode = 'rawimg'
+# Note: We use calibration mode to get the cropped and resized image!
+streamingMode = 'calibration'
 
 boardDimensions = (7,12)
 # boardDimensions = (3,3)

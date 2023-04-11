@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import util.image_functions as img
+import util.constants as cnst
 
 class StereoCamera:
   
@@ -18,6 +19,16 @@ class StereoCamera:
   SHOW_MODE_RECTIFIED     = 2
   SHOW_MODE_RAW_IMG       = 3
   SHOW_MODE_LAPLCE_IMG    = 4
+  # Calibration mode: Raw images are resized to calibration size 
+  # Note: This mode must be used by streaming calls that rectify the image
+  #       downstream!
+  SHOW_MODE_CALIBRATION   = 5
+
+  MAX_CONNECTION_ATTEMPTS = 20
+
+  # [!] Left and right stereo bench camera port ID
+  LEFT_CAMERA_PORT  = 0
+  RIGHT_CAMERA_PORT = 1
   
   def __init__(self, log):
     self.log = log
@@ -26,27 +37,23 @@ class StereoCamera:
     self.stereoImgGray = []
 
   def captureStereoImagePair(self):
-    # [!] Left stereo bench camera port ID
-    cam01_port = 0
-    # [!] Rigth stereo bench camera port ID
-    cam02_port = 1
-
     self.log.pLogMsg(' [Open camera interfaces]')
     self.log.pLogMsg('')
     # Open Video capture for both cameras
-    leftCamInterface  = cv.VideoCapture(cam01_port)
-    rightCamInterface = cv.VideoCapture(cam02_port)
+    leftCamInterface  = cv.VideoCapture(self.LEFT_CAMERA_PORT)
+    rightCamInterface = cv.VideoCapture(self.RIGHT_CAMERA_PORT)
 
     # Check if both webcams have been opened correctly
     if not leftCamInterface.isOpened():
       raise IOError("Cannot open webcam 01")
     if not rightCamInterface.isOpened():
       raise IOError("Cannot open webcam 02")
+
+    # Initialize flags and counters
     suc1 = False
     suc2 = False
-    maxAttempts = 20
     attemptCount = 0 
-    while (not suc1 and not suc2 or attemptCount < maxAttempts ):
+    while (not suc1 and not suc2 or attemptCount < self.MAX_CONNECTION_ATTEMPTS ):
       (suc1, 
        self.imgl, 
        suc2, 
@@ -88,6 +95,11 @@ class StereoCamera:
 
     if showProduct == 'rawimg':
       showMode   = self.SHOW_MODE_RAW_IMG
+    elif showProduct == 'calibration':
+      self.log.pLogMsg(f' >> Calibration Mode selected')
+      self.log.pLogWrn(f'Captured images will be cropped and resized to {cnst.IMG_OUT_RESOLUTION_XY_PX} x {cnst.IMG_OUT_RESOLUTION_XY_PX} ')
+      self.log.pLogMsg(f' ------------------------------ ')
+      showMode   = self.SHOW_MODE_CALIBRATION
     elif showProduct == 'rectimg':
       showMode   = self.SHOW_MODE_RECTIFIED
     elif showProduct == 'dispmap':
@@ -98,31 +110,30 @@ class StereoCamera:
       self.log.pLogMsg('ERROR: showProduct not recognized. Using default show raw images.')
       showMode   = self.SHOW_MODE_RAW_IMG
     
-    # [!] Left stereo bench camera port ID
-    cam01_port = 0
-    # [!] Rigth stereo bench camera port ID
-    cam02_port = 1
     # Initialise image index for saved files 
     img_index  = 0
 
     self.log.pLogMsg(' [Open camera interfaces]')
     self.log.pLogMsg('')
     # Open Video capture for both cameras
-    leftCamInterface  = cv.VideoCapture(cam01_port)
-    rightCamInterface = cv.VideoCapture(cam02_port)
+    leftCamInterface  = cv.VideoCapture(self.LEFT_CAMERA_PORT)
+    rightCamInterface = cv.VideoCapture(self.RIGHT_CAMERA_PORT)
 
     # Check if both webcams have been opened correctly
     if not leftCamInterface.isOpened():
       raise IOError("Cannot open webcam 01")
     if not rightCamInterface.isOpened():
       raise IOError("Cannot open webcam 02")
+    
+    self.doStreaming = True
 
-    while True:
+    while self.doStreaming:
         if not isStartupMsgShown:
           isStartupMsgShown = True
           self.log.pLogMsg('')
           self.log.pLogMsg(' ==> [Start Streaming]')
           self.log.pLogMsg('')
+          self._printKeyShortcuts()
 
         (suc1, 
          self.imgl, 
@@ -149,7 +160,17 @@ class StereoCamera:
             self.imgToShow = cv.hconcat([rimgl, rimgr])
           elif showMode == self.SHOW_MODE_RAW_IMG:
             self.imgToShow = cv.hconcat([self.imgl, self.imgr])
-            self.imgToShow = cv.resize(self.imgToShow, (1200,600), interpolation=cv.INTER_AREA)
+            self.stereoImgGray = cv.cvtColor(self.imgToShow, cv.COLOR_BGR2GRAY) 
+          elif showMode == self.SHOW_MODE_CALIBRATION:
+            # Crop images to maximum resolution squared images
+            self.imgl = self.imgl[:,cnst.IMG_OUT_CROP_X_PX:(cnst.C270_NATIVE_RESOLUTION_Y_PX + cnst.IMG_OUT_CROP_X_PX )]
+            self.imgr = self.imgr[:,cnst.IMG_OUT_CROP_X_PX:(cnst.C270_NATIVE_RESOLUTION_Y_PX + cnst.IMG_OUT_CROP_X_PX )]
+            # Resize image to output resolution
+            self.imgl = cv.resize(self.imgl, (cnst.IMG_OUT_RESOLUTION_XY_PX, cnst.IMG_OUT_RESOLUTION_XY_PX))
+            self.imgr = cv.resize(self.imgr, (cnst.IMG_OUT_RESOLUTION_XY_PX, cnst.IMG_OUT_RESOLUTION_XY_PX))
+            # Concatenate stereo image
+            self.imgToShow = cv.hconcat([self.imgl, self.imgr])
+            # Assign output image 
             self.stereoImgGray = cv.cvtColor(self.imgToShow, cv.COLOR_BGR2GRAY) 
           elif showMode == self.SHOW_MODE_LAPLCE_IMG:
             kernel_size = 5
@@ -174,9 +195,11 @@ class StereoCamera:
         # Define key input actions
         if key == ord('q'):
           # [q] -> exit
+          self._printExitStreamingMsg()
           break
         elif key == 27:
           # [ESC] -> exit
+          self._printExitStreamingMsg()
           break
         elif key == ord('c'):
           # [c] -> Save image to file
@@ -212,6 +235,21 @@ class StereoCamera:
     leftCamInterface.release()
     rightCamInterface.release()
     cv.destroyAllWindows()
+    self._printExitStreamingMsg()
+
+  def _printKeyShortcuts(self):
+    self.log.pLogMsg(f'------------------------')
+    self.log.pLogMsg(f' [Control Keys]')
+    self.log.pLogMsg(f'------------------------')
+    self.log.pLogMsg(f' [Esc] or [q] -> Quit streaming')
+    self.log.pLogMsg(f' [c] -> Capture stereo image pair')
+    self.log.pLogMsg(f' [s] -> Save capturing statistics')
+    self.log.pLogMsg(f'')
+
+  def _printExitStreamingMsg(self):
+    self.log.pLogMsg(f'------------------------')
+    self.log.pLogMsg(f' [Exit Streaming]')
+    self.log.pLogMsg(f'------------------------')
 
   def _acquireStereoImagePair(self, leftCamInterface, rightCamInterface, isPromptGrabDelay):
       # Grab frames from both cameras
@@ -254,3 +292,7 @@ class StereoCamera:
     limg = cv.Laplacian(limg, ddepth, ksize=kernel_size)
     rimg = cv.Laplacian(rimg, ddepth, ksize=kernel_size)
     return limg, rimg
+  
+  def exitStreaming(self):
+    self.doStreaming = False
+  

@@ -5,8 +5,6 @@ class CalibImageData():
     # mono calibration image file path
     imageFilePath = ""
     
-    averageReprojError_left = 0
-    averageReprojError_right = 0
     
     reprojErrorArray_left = []
     reprojErrorArray_right = []
@@ -19,13 +17,15 @@ class CalibImageData():
     
     # Reprojection error statistics
     # min/max and standard variation per image 
+    averageReprojError_left = 0
     maxReprojError_left  = 0
-    minReprojError_left = 0 
-    stdReprojError_left = 0
+    minReprojError_left  = 0 
+    stdReprojError_left  = 0
     
+    averageReprojError_right = 0
     maxReprojError_right  = 0
-    minReprojError_right = 0 
-    stdReprojError_right = 0
+    minReprojError_right  = 0 
+    stdReprojError_right  = 0
     
     imageIndex = 0 
     
