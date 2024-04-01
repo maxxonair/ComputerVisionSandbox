@@ -12,6 +12,8 @@ import glob
 import numpy as np
 import os
 import math
+import json
+from pathlib import Path
 
 from util.CameraMetaData import CameraData
 from util.CalibImageData import CalibImageData
@@ -71,6 +73,15 @@ class StereoCalibrator:
     totalReprojectionError = 0
 
     rectificationAlpha = 0
+    
+    # Stereo camera class streaming mode constants
+    # TODO: This should only be maintained here temporarily
+    STEREOCAMERA_OBS_MODE_NONE          = 0
+    STEREOCAMERA_OBS_MODE_DISPARITY_MAP = 1
+    STEREOCAMERA_OBS_MODE_RECTIFIED     = 2
+    STEREOCAMERA_OBS_MODE_RAW_IMG       = 3
+    STEREOCAMERA_OBS_MODE_LAPLCE_IMG    = 4
+    STEREOCAMERA_OBS_MODE_CALIBRATION   = 5
 
     imageSize = []
     # --------------------------------------------------------------------------
@@ -188,8 +199,22 @@ class StereoCalibrator:
         self.log.pLogMsg("[READ RAW CALIBRATION IMAGES]")
         self.log.pLogMsg("")
         self.log.pLogMsg(self._createLargeSeparator())
+        
+        
+        # Opening JSON file
+        self.log.pLogMsg("Read image set meta data file: ")
+        with open((Path(self.sInputFilePath) / 'stereo_img_meta.json').absolute().as_posix()) as json_file:
+            self.session_meta_data = json.load(json_file)
+            
+        if self.session_meta_data is None:
+            self.log.pLogErr("")
+            self.log.pLogErr("No calibration image set meta data file (stereo_img_meta.json) found.")
+            self.log.pLogErr("Exiting.")
+            self.log.pLogErr("")
+            return 0
+            
         # List calibration images:
-        self.dual_images    = glob.glob(self.sInputFilePath+"*")
+        self.dual_images    = glob.glob((Path(self.sInputFilePath) / f"{self.session_meta_data['img_prefix']}*.png").absolute().as_posix())
         imageIndex          = 0
         self.iNrImagesInSet = 0
         # Reset success index list
@@ -203,6 +228,18 @@ class StereoCalibrator:
             self.log.pLogErr("Exiting.")
             self.log.pLogErr("")
             return 0
+        elif len(self.dual_images) != self.session_meta_data['number_of_images']:
+            self.log.pLogErr("")
+            self.log.pLogErr(f"Number of stereo frames found in folder ({len(self.dual_images)}) does not match number reported in meta data file ({self.session_meta_data['number_of_images']})")
+            self.log.pLogErr("")
+            input("Press Enter to accept and continue anyway...")
+        elif self.session_meta_data['mode'] != self.STEREOCAMERA_OBS_MODE_CALIBRATION:
+            self.log.pLogErr("")
+            self.log.pLogErr(f"Input image meta data reports image capture mode that is not 'CALIBRATION' ({self.session_meta_data['mode']}) ")
+            self.log.pLogErr("The selected mode images were caputered with is not intended for calibration purposes. ")
+            self.log.pLogErr("")
+            input("Press Enter to accept and continue anyway ...")
+            
 
         for ii, fname in tqdm( enumerate( self.dual_images ) ):
             # Load dual image
@@ -222,6 +259,8 @@ class StereoCalibrator:
             outputImage = gray
             outputColor = img
             
+            # TODO: This could be replaced by using the respective value from the 
+            #       meta data file
             (h, w) = gray.shape[:2]
             # Split dual image into left&right image
             # + -----> w/x
@@ -358,7 +397,6 @@ class StereoCalibrator:
                          (self.iNrImagesInSet/imageIndex * 100))
         self.log.pLogMsg(self._createLineSeparator())
 
-
         self._monoCalibrate()
     
     # Function: Run stereo calibration and save images 
@@ -380,10 +418,6 @@ class StereoCalibrator:
                             cv.CALIB_USE_INTRINSIC_GUESS +
                             cv.CALIB_SAME_FOCAL_LENGTH +
                             cv.CALIB_FIX_PRINCIPAL_POINT )
-                            # cv.CALIB_RATIONAL_MODEL +
-        #                     # cv.CALIB_FIX_K3 + 
-        #                     # cv.CALIB_FIX_K4 + 
-        #                     # cv.CALIB_FIX_K5)   
         
         (flagStereoCalibrationSucceeded, 
          self.stereoCalibData.K1, 
@@ -472,7 +506,8 @@ class StereoCalibrator:
     #
     def rectifyCalibImages(self):
         # List calibration images:
-        images = glob.glob(self.sInputFilePath+"*")
+        images = glob.glob((Path(self.sInputFilePath) / f"{self.session_meta_data['img_prefix']}*.png").absolute().as_posix())
+        
         # Check that calibration has been completed 
         if self.bFlagCalibrationComplete:
             self.log.pLogMsg('')
@@ -486,6 +521,13 @@ class StereoCalibrator:
             for fname in tqdm(images):
                 # Load image
                 dual_img = cv.imread(fname)
+                
+                if dual_img is None:
+                    self.log.pLogWrn(f'Loaded input image is None!')
+                    self.log.pLogErr('Exiting')
+                    self.log.pLogErr('')
+                    exit(1)
+                    
                 # Convert to grayscale
                 dual_img = cv.cvtColor(dual_img, cv.COLOR_BGR2GRAY)
                 

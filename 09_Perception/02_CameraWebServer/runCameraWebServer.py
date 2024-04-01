@@ -28,6 +28,10 @@ def generateFrameByFrame():
                 log.pLogErr('Failed to conntect to camera.')
                 break
             else:
+                # Rotate by 180 degree to compensate for how the camera is mounted
+                # inside the housing
+                frame = cv.rotate(frame, cv.ROTATE_180)
+                
                 ret, buffer = cv.imencode('.jpg', frame)
                 frame = buffer.tobytes()
                 yield (b'--frame\r\n'

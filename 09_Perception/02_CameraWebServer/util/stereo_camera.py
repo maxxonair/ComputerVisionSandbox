@@ -12,7 +12,7 @@ import util.constants as cnst
 class StereoCamera:
   
   # Define imageShow window title:
-  imgWindowName = "StereoBench camera image feed [.mk0]"
+  imgWindowName = "StereoBench stream [.mk0]"
 
   # Streaming mode constants
   SHOW_MODE_DISPARITY_MAP = 1
@@ -30,6 +30,11 @@ class StereoCamera:
   LEFT_CAMERA_PORT  = 0
   RIGHT_CAMERA_PORT = 1
   
+  # Correct for any camera rotation
+  # If true -> Rotate image by 180 degree
+  ENABLE_ROTATE_LEFT_IMG  = True
+  ENABLE_ROTATE_RIGHT_IMG = False
+
   def __init__(self, log):
     self.log = log
     self.imgl = []
@@ -278,6 +283,12 @@ class StereoCamera:
         # Read camera frames
         suc1, self.imgl = leftCamInterface.retrieve()
         suc2, self.imgr = rightCamInterface.retrieve()
+        
+        # Correct for any camera rotation if enabled
+        if self.ENABLE_ROTATE_LEFT_IMG:
+          self.imgl = cv.rotate(self.imgl, cv.ROTATE_180)
+        if self.ENABLE_ROTATE_RIGHT_IMG:
+          self.imgr = cv.rotate(self.imgr, cv.ROTATE_180)
 
       return (suc1,self. imgl, suc2, self.imgr, timetag_ms)
 

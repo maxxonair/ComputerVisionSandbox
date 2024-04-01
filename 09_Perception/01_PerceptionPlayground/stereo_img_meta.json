@@ -1,0 +1,15 @@
+{
+    "date": "2024_04_01_10_56_06",
+    "img_prefix": "stereoimg_",
+    "mode": 5,
+    "number_of_images": 0,
+    "stereo_img_res": [
+        1800,
+        900
+    ],
+    "single_img_res": [
+        900,
+        900
+    ],
+    "x_cut_coord": 900
+}

@@ -18,7 +18,7 @@ import signal
 import numpy as np
 import cv2 as cv
 
-from util.stereo_camera import StereoCamera
+from util.StereoCamera import StereoCamera
 import util.image_functions as img
 from util.ChartClasses.CoordinateSystem import Frame
 import util.constants as cnst
@@ -288,7 +288,7 @@ class MonitorChart:
 
       # [Rectify raw images]
       (self.rimgl, 
-       self.rimgr) = img.rectifyStereoImageSet(self.gimgl, 
+       self.rimgr) = img.rectify_stereo_image(self.gimgl, 
                                           self.gimgr, 
                                           self.undistMaps)
       

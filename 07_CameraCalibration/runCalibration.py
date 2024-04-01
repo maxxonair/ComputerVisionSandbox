@@ -39,7 +39,7 @@ def main():
     # raw_img_path = "./_camera_01_calibration/2022_44_28_Aug_08_1661683472_frame_capture/"
     # Stereo set 
     # raw_img_path = "./_camera_01_02_stereo_calibration_24_01_2023/_raw_imgs/2023_26_22_Jan_01_1674419201_frame_capture"
-    raw_img_path = './2023_04_11_18_10_00_frame_capture/'
+    raw_img_path = '/Users/mrx/Documents/003_Tools/42_ImageProcessing/07_CameraCalibration/camera_calibrations/2024_04_01_15_22_19_frame_capture'
 
     # >> Setup folder structure 
     # Setup folder to save images to 
