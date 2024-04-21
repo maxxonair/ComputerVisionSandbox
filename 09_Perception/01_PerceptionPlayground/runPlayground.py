@@ -39,9 +39,10 @@ PM_PATTERN_DETECTION_STATIC_TEST    = 4
 PM_PATTERN_DETECTION_STREAMING_TEST = 5
 PM_FEATURE_DETECTION_STATIC_TEST    = 6
 PM_PATTERN_DIRECTION_STREAMING_TEST = 7
+PM_FACE_RECOGNITION_TEST            = 8
 
 # [!] Define play mode
-playMode = PM_PATTERN_DETECTION_STREAMING_TEST
+playMode = PM_FACE_RECOGNITION_TEST
 
 # Img index (asset/01_input_images/) for static tests
 testIndex = 21
@@ -359,6 +360,8 @@ def main():
 
         cv.imwrite('./output/test.png', sFinder.debugImg)
 
+    elif playMode == PM_FACE_RECOGNITION_TEST:    
+        camera.startStreaming(undist_maps, 'facerecognition', True, cam_calibration)
     else:
         log.pLogErr('playMode not valid. Exiting')
         exit(1)

@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 '''
 
 @description: Class to interface home-build stereo camera using a USB interface 
@@ -54,9 +55,27 @@ import datetime
 import numpy as np
 import matplotlib.pyplot as plt
 import json
+from facenet_pytorch import MTCNN, InceptionResnetV1
+import torch
+from dataclasses import dataclass
+from typing import Tuple
 
 import util.image_functions as img
 import util.constants as cnst
+
+@dataclass
+class StereoFace:
+    """ Class for keeping track of key metrics from a stereo face detection """
+    id: int
+    center_coords_left_px: Tuple[int, int]
+    center_coords_right_px: Tuple[int, int]
+    radius_px: int
+    
+    def __init__(self, id, center_coords_left_px, center_coords_right_px, radius_px):
+      self.id = id
+      self.center_coords_left_px = center_coords_left_px
+      self.center_coords_right_px = center_coords_right_px
+      self.radius_px = radius_px
 
 class StereoCamera:
   
@@ -72,7 +91,8 @@ class StereoCamera:
   # Calibration mode: Raw images are resized to calibration size 
   # Note: This mode must be used by streaming calls that rectify the image
   #       downstream!
-  SHOW_MODE_CALIBRATION   = 5
+  SHOW_MODE_CALIBRATION  = 5
+  SHOW_MODE_FACE_RECOGNITION = 6
 
   MAX_CONNECTION_ATTEMPTS = 20
 
@@ -93,8 +113,23 @@ class StereoCamera:
   ENABLE_ROTATE_LEFT_IMG  = True
   ENABLE_ROTATE_RIGHT_IMG = False
   
+              
+  # ---- Face recognition settings
+  FACE_MARKER_THICKNESS = 1
+  FACE_MARKER_COLOR     = (0,240,2)
+  
+  # Set confidence threshold to discard face recognition results
+  FACE_RECOGN_CONF_THR  = 0.94
+  
   # Default prefix when saving stereo frames to file
   IMG_PREFIX = 'stereoimg_'
+  
+  # Define HUD settings
+  HUD_FONT_SCALE = 0.4
+  HUD_TEXT_START_OFFSET_Y = 40
+  HUD_TEXT_START_OFFSET_X = 20
+  HUD_TEXT_STEP_Y = 20
+  HUD_FONT = cv.FONT_HERSHEY_SIMPLEX
   #-----------------------------------------------------------------------------
   #                       [initialize]
   #-----------------------------------------------------------------------------
@@ -102,6 +137,9 @@ class StereoCamera:
     self.log = log
     self.imgl = []
     self.imgr = []
+    
+    self.stereoFacesList = []
+    
     self.stereoImgGray = []
     # Initialize counter to count number of saved images
     self.saved_img_counter = 0
@@ -159,7 +197,7 @@ class StereoCamera:
       self.imgr = []
       return self.imgl, self.imgr
 
-  def startStreaming(self, undist_maps, showProduct, showImages=False):
+  def startStreaming(self, undist_maps, showProduct, showImages=False, camCalibration=None):
     # Setup folder to save images to 
     dateTimeStr = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     folder_name = f'{dateTimeStr}_frame_capture'
@@ -192,6 +230,11 @@ class StereoCamera:
       self.set_mode   = self.SHOW_MODE_DISPARITY_MAP
     elif showProduct == 'laplace':
       self.set_mode   = self.SHOW_MODE_LAPLCE_IMG
+    elif showProduct == 'facerecognition':
+      self.set_mode   = self.SHOW_MODE_FACE_RECOGNITION
+      device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+      print('Running on device: {}'.format(device))
+      self.mtcnn = MTCNN(keep_all=True, device=device)
     else:
       self.log.pLogMsg('ERROR: showProduct not recognized. Using default show raw images.')
       self.set_mode   = self.SHOW_MODE_RAW_IMG
@@ -228,6 +271,7 @@ class StereoCamera:
          timetag_ms) = self._acquireStereoImagePair(leftCamInterface, 
                                                     rightCamInterface, 
                                                     isPromptGrabDelay)
+        self.imgdim = self.imgl.shape
         grabDiffList.append(timetag_ms)
 
         if suc1 and suc2: 
@@ -266,6 +310,155 @@ class StereoCamera:
             (rimgl, rimgr) = self._laplaceTransformStereoPair(rimgl, rimgr, kernel_size)
             # Show image
             self.imgToShow = cv.hconcat([rimgl, rimgr])
+          elif self.set_mode == self.SHOW_MODE_FACE_RECOGNITION:
+            # Crop images to maximum resolution squared images
+            self.imgl = self.imgl[:,cnst.IMG_OUT_CROP_X_PX:(cnst.C270_NATIVE_RESOLUTION_Y_PX 
+                                                            + cnst.IMG_OUT_CROP_X_PX )]
+            self.imgr = self.imgr[:,cnst.IMG_OUT_CROP_X_PX:(cnst.C270_NATIVE_RESOLUTION_Y_PX 
+                                                            + cnst.IMG_OUT_CROP_X_PX )]
+            # Resize image to output resolution
+            self.imgl = cv.resize(self.imgl, (cnst.IMG_OUT_RESOLUTION_XY_PX,
+                                              cnst.IMG_OUT_RESOLUTION_XY_PX))
+            self.imgr = cv.resize(self.imgr, (cnst.IMG_OUT_RESOLUTION_XY_PX,
+                                              cnst.IMG_OUT_RESOLUTION_XY_PX))
+
+            # Clear list of detected faces in stereo frame 
+            self.stereoFacesList = []
+            
+            # Create copies to draw on
+            self.imgDisplayL = self.imgl.copy()
+            self.imgDisplayR = self.imgr.copy()
+              
+            # Detect faces in the left image
+            boxesl, confl = self.mtcnn.detect(self.imgl)
+            # Detect faces in the right image
+            boxesr, confr = self.mtcnn.detect(self.imgr)
+            
+            # Initialize results metrics
+            numFacesL = 0 
+            numFacesR = 0
+            faceCenterL = (0, 0)
+            faceCenterR = (0, 0)
+            
+            if boxesl is not None:
+              if confl[0] > self.FACE_RECOGN_CONF_THR:
+                boxesl = np.asarray(boxesl, np.int32)
+                boxDiml = boxesl.shape
+                numFacesL = boxDiml[0]
+
+                faceCenterL = (int((boxesl[0,0] + boxesl[0,2]) / 2),
+                              int((boxesl[0,1] + boxesl[0,3]) / 2))
+                self.imgDisplayL = cv.rectangle(self.imgDisplayL,
+                                                (boxesl[0,0], boxesl[0,1]),
+                                                (boxesl[0,2], boxesl[0,3]),
+                                                self.FACE_MARKER_COLOR,
+                                                self.FACE_MARKER_THICKNESS)
+                self.imgDisplayL = cv.circle(self.imgDisplayL,faceCenterL,
+                                             10, self.FACE_MARKER_COLOR, 1)
+                self.imgDisplayL = cv.circle(self.imgDisplayL,faceCenterL,
+                                             1, self.FACE_MARKER_COLOR, 1)
+              
+            if boxesr is not None:
+              if confr[0] > self.FACE_RECOGN_CONF_THR:
+                boxesr = np.asarray(boxesr, np.int32)
+                boxDimr = boxesr.shape
+                numFacesR = boxDimr[0]
+                faceCenterR = (int((boxesr[0,0] + boxesr[0,2]) / 2),
+                              int((boxesr[0,1] + boxesr[0,3]) / 2))
+                self.imgDisplayR = cv.rectangle(self.imgDisplayR,
+                                                (boxesr[0,0], boxesr[0,1]),
+                                                (boxesr[0,2], boxesr[0,3]),
+                                                self.FACE_MARKER_COLOR,
+                                                self.FACE_MARKER_THICKNESS)
+                
+                self.imgDisplayR = cv.circle(self.imgDisplayR,faceCenterR,
+                                             10, self.FACE_MARKER_COLOR,
+                                             self.FACE_MARKER_THICKNESS)
+                self.imgDisplayR = cv.circle(self.imgDisplayR,faceCenterR,
+                                             1,
+                                             self.FACE_MARKER_COLOR,
+                                             self.FACE_MARKER_THICKNESS)
+                
+            # If a face is found in both images
+            if camCalibration is not None:
+              if numFacesL and numFacesR:
+                
+                # Compute number of faces seen in both frames
+                # TODO these do not necessarily have to match. Something to be 
+                # added to sort that out
+                if numFacesL > numFacesR:
+                  numFaces = numFacesR
+                else:
+                  numFaces = numFacesL
+                  
+                for faceId in range(numFaces):
+                  self.stereoFacesList.append(StereoFace(faceId, faceCenterL, faceCenterR, 0))
+                  
+                p1 = np.zeros((3,1), np.float32)
+                p2 = np.zeros((3,1), np.float32)
+                v1 = img.getFeatureDirectionVector(faceCenterL,
+                                                   np.asarray(camCalibration['K1']))
+                
+                v2 = img.getFeatureDirectionVector((faceCenterR[0],faceCenterL[1]),
+                                                   np.asarray(camCalibration['K2']))
+                
+                # TODO: Stereo baseline currently not written to calibration files
+                #       Add stereo baseline to calibration and remove this hard
+                #       coded value
+                # Note: The currently set value of 0.11807402364993869 m was 
+                #       taken directly from the calibration log of the calibration
+                #       linked at the time.
+                p2[0] = 0.11807402364993869
+                
+                facePos_cam_m, faceDist_m = img.triangulateStereoFeature(p1=p1,
+                                                              v1=v1,
+                                                              p2=p2,
+                                                              v2=v2)
+                
+                # Post-process position vector for displaying
+                facePos_cam_m = np.asarray(facePos_cam_m)
+                facePos_cam_m = np.squeeze(facePos_cam_m)
+
+                self.imgDisplayL = cv.putText(self.imgDisplayL,
+                                              f'Distance to person [m] : {faceDist_m:.2f}',
+                                              (self.HUD_TEXT_START_OFFSET_X
+                                              ,self.HUD_TEXT_START_OFFSET_Y),
+                                              self.HUD_FONT,
+                                              self.HUD_FONT_SCALE,
+                                              self.FACE_MARKER_COLOR,
+                                              1, cv.LINE_AA)
+                self.imgDisplayL = cv.putText(self.imgDisplayL,
+                                              f'Person position    [m] : {facePos_cam_m[0]:.2f} {facePos_cam_m[1]:.2f} {facePos_cam_m[2]:.2f}',
+                                              (self.HUD_TEXT_START_OFFSET_X
+                                              ,self.HUD_TEXT_START_OFFSET_Y+self.HUD_TEXT_STEP_Y),
+                                              self.HUD_FONT,
+                                              self.HUD_FONT_SCALE,
+                                              self.FACE_MARKER_COLOR,
+                                              1, cv.LINE_AA)
+            else: 
+              numFaces = 10
+              self.log.pLogWrn(f'No camera calibration data given. Face localisation disabled.')
+              self.imgDisplayL = cv.putText(self.imgDisplayL,
+                                            f'Distance to person [m] : N/A',
+                                            (self.HUD_TEXT_START_OFFSET_X
+                                            ,self.HUD_TEXT_START_OFFSET_Y),
+                                            self.HUD_FONT,
+                                            self.HUD_FONT_SCALE,
+                                            self.FACE_MARKER_COLOR,
+                                            1, cv.LINE_AA)
+              self.imgDisplayL = cv.putText(self.imgDisplayL,
+                                            f'Person position    [m] : N/A',
+                                            (self.HUD_TEXT_START_OFFSET_X
+                                            ,self.HUD_TEXT_START_OFFSET_Y+self.HUD_TEXT_STEP_Y),
+                                            self.HUD_FONT,
+                                            self.HUD_FONT_SCALE,
+                                            self.FACE_MARKER_COLOR,
+                                            1, cv.LINE_AA)
+            
+            # self.log.pLogMsg(f'Number of faces detected by both eyes: {numFaces} ')
+              
+            # Compile output image 
+            self.imgToShow = cv.hconcat([self.imgDisplayL, self.imgDisplayR])
           else:
             self.log.pLogMsg("[ERR] Error self.set_mode not valid. Exiting")
             break
@@ -281,6 +474,10 @@ class StereoCamera:
         # Define key input actions
         if key == ord('q'):
           # [q] -> exit
+          self._callback_on_exit_fnct()
+          break
+        elif key == 'esc':
+          # [ESC] -> exit
           self._callback_on_exit_fnct()
           break
         elif key == 27:
