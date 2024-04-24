@@ -55,27 +55,12 @@ import datetime
 import numpy as np
 import matplotlib.pyplot as plt
 import json
-from facenet_pytorch import MTCNN, InceptionResnetV1
-import torch
-from dataclasses import dataclass
-from typing import Tuple
+from pathlib import Path
 
 import util.image_functions as img
 import util.constants as cnst
 
-@dataclass
-class StereoFace:
-    """ Class for keeping track of key metrics from a stereo face detection """
-    id: int
-    center_coords_left_px: Tuple[int, int]
-    center_coords_right_px: Tuple[int, int]
-    radius_px: int
-    
-    def __init__(self, id, center_coords_left_px, center_coords_right_px, radius_px):
-      self.id = id
-      self.center_coords_left_px = center_coords_left_px
-      self.center_coords_right_px = center_coords_right_px
-      self.radius_px = radius_px
+from util.FaceDetector import StereoFace, FaceDetector
 
 class StereoCamera:
   
@@ -93,6 +78,7 @@ class StereoCamera:
   #       downstream!
   SHOW_MODE_CALIBRATION  = 5
   SHOW_MODE_FACE_RECOGNITION = 6
+  SHOW_MODE_CAPTURE_TEMPLATE = 7
 
   MAX_CONNECTION_ATTEMPTS = 20
 
@@ -113,23 +99,20 @@ class StereoCamera:
   ENABLE_ROTATE_LEFT_IMG  = True
   ENABLE_ROTATE_RIGHT_IMG = False
   
-              
-  # ---- Face recognition settings
-  FACE_MARKER_THICKNESS = 1
-  FACE_MARKER_COLOR     = (0,240,2)
+  IMG_PREFIX= ''
   
-  # Set confidence threshold to discard face recognition results
-  FACE_RECOGN_CONF_THR  = 0.94
+  FACE_TEMPLATE_PREFIX= 'face_template'
   
-  # Default prefix when saving stereo frames to file
-  IMG_PREFIX = 'stereoimg_'
-  
-  # Define HUD settings
+    # Define HUD settings
   HUD_FONT_SCALE = 0.4
   HUD_TEXT_START_OFFSET_Y = 40
   HUD_TEXT_START_OFFSET_X = 20
   HUD_TEXT_STEP_Y = 20
   HUD_FONT = cv.FONT_HERSHEY_SIMPLEX
+  
+  FACE_MARKER_THICKNESS = 1
+  FACE_MARKER_COLOR     = (0,240,2)
+  
   #-----------------------------------------------------------------------------
   #                       [initialize]
   #-----------------------------------------------------------------------------
@@ -139,6 +122,8 @@ class StereoCamera:
     self.imgr = []
     
     self.stereoFacesList = []
+    
+    self.currentFaceTemplateCapture = []
     
     self.stereoImgGray = []
     # Initialize counter to count number of saved images
@@ -232,12 +217,18 @@ class StereoCamera:
       self.set_mode   = self.SHOW_MODE_LAPLCE_IMG
     elif showProduct == 'facerecognition':
       self.set_mode   = self.SHOW_MODE_FACE_RECOGNITION
-      device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-      print('Running on device: {}'.format(device))
-      self.mtcnn = MTCNN(keep_all=True, device=device)
+      # Initialize detectors for left and right cameras
+      self.faceDetectorL = FaceDetector(self.log)
+      self.faceDetectorR = FaceDetector(self.log)
+    elif showProduct == 'capturefacetemplate':
+      self.set_mode   = self.SHOW_MODE_CAPTURE_TEMPLATE
+      # Initialize detectors for left and right cameras
+      self.faceDetectorL = FaceDetector(self.log)
     else:
       self.log.pLogMsg('ERROR: showProduct not recognized. Using default show raw images.')
       self.set_mode   = self.SHOW_MODE_RAW_IMG
+    
+    self.log.pLogMsg(f'Start streaming in mode >> {self.set_mode}')
     
     # Initialise image index for saved files 
     img_index  = 0
@@ -305,7 +296,7 @@ class StereoCamera:
           elif self.set_mode == self.SHOW_MODE_LAPLCE_IMG:
             kernel_size = 5
             # Rectify camera images 
-            (rimgl, rimgr) = img.rectify_stereo_image(self.imgl, self.imgr, undist_maps)
+            (rimgl, rimgr) = img.rectifyß_stereo_image(self.imgl, self.imgr, undist_maps)
             # Laplace transform rectified image pair 
             (rimgl, rimgr) = self._laplaceTransformStereoPair(rimgl, rimgr, kernel_size)
             # Show image
@@ -321,68 +312,47 @@ class StereoCamera:
                                               cnst.IMG_OUT_RESOLUTION_XY_PX))
             self.imgr = cv.resize(self.imgr, (cnst.IMG_OUT_RESOLUTION_XY_PX,
                                               cnst.IMG_OUT_RESOLUTION_XY_PX))
+            
+            # Perfom face recoginition on left and right image separately
+            numFacesL, faceListL, self.imgDisplayL = self.faceDetectorL.detect(self.imgl)
+            numFacesR, faceListR, self.imgDisplayR = self.faceDetectorR.detect(self.imgr)
+            
+            # ------------------------------------------------------------------
+            # ----  Face matching
+            faceTemplates = Path('./assets/03_face_templates')
+            faceTemplates = list(faceTemplates.glob("*.png"))
 
-            # Clear list of detected faces in stereo frame 
-            self.stereoFacesList = []
-            
-            # Create copies to draw on
-            self.imgDisplayL = self.imgl.copy()
-            self.imgDisplayR = self.imgr.copy()
+            for templatePath in faceTemplates:
+              template = cv.imread(templatePath.absolute().as_posix())
+              template_name = (templatePath.absolute().as_posix()).replace('.png','')
+              template_name = template_name.split('/')
+              template_name = template_name[-1]
               
-            # Detect faces in the left image
-            boxesl, confl = self.mtcnn.detect(self.imgl)
-            # Detect faces in the right image
-            boxesr, confr = self.mtcnn.detect(self.imgr)
+              if template is not None:
+                # self.log.pLogMsg(f'Template for {template_name} loaded')
+                for face in faceListL:
+                  (isMatch,
+                   confidence) = self.faceDetectorL.match(self.imgl[face.box_top_left_px[1]:face.box_bottom_right_px[1],
+                                                               face.box_top_left_px[0]:face.box_bottom_right_px[0]],
+                                                          template)
+                  if isMatch:
+                    # self.log.pLogMsg(f'{template_name} found at {face.box_bottom_right_px}')
+                    self.imgDisplayL = cv.putText(self.imgDisplayL,
+                                                  f'{template_name} ({confidence:.3f})',
+                                                  face.box_bottom_right_px,
+                                                  self.HUD_FONT,
+                                                  1,
+                                                  (240,20,0),
+                                                  1, cv.LINE_AA)
             
-            # Initialize results metrics
-            numFacesL = 0 
-            numFacesR = 0
-            faceCenterL = (0, 0)
-            faceCenterR = (0, 0)
-            
-            if boxesl is not None:
-              if confl[0] > self.FACE_RECOGN_CONF_THR:
-                boxesl = np.asarray(boxesl, np.int32)
-                boxDiml = boxesl.shape
-                numFacesL = boxDiml[0]
+            # ------------------------------------------------------------------
 
-                faceCenterL = (int((boxesl[0,0] + boxesl[0,2]) / 2),
-                              int((boxesl[0,1] + boxesl[0,3]) / 2))
-                self.imgDisplayL = cv.rectangle(self.imgDisplayL,
-                                                (boxesl[0,0], boxesl[0,1]),
-                                                (boxesl[0,2], boxesl[0,3]),
-                                                self.FACE_MARKER_COLOR,
-                                                self.FACE_MARKER_THICKNESS)
-                self.imgDisplayL = cv.circle(self.imgDisplayL,faceCenterL,
-                                             10, self.FACE_MARKER_COLOR, 1)
-                self.imgDisplayL = cv.circle(self.imgDisplayL,faceCenterL,
-                                             1, self.FACE_MARKER_COLOR, 1)
-              
-            if boxesr is not None:
-              if confr[0] > self.FACE_RECOGN_CONF_THR:
-                boxesr = np.asarray(boxesr, np.int32)
-                boxDimr = boxesr.shape
-                numFacesR = boxDimr[0]
-                faceCenterR = (int((boxesr[0,0] + boxesr[0,2]) / 2),
-                              int((boxesr[0,1] + boxesr[0,3]) / 2))
-                self.imgDisplayR = cv.rectangle(self.imgDisplayR,
-                                                (boxesr[0,0], boxesr[0,1]),
-                                                (boxesr[0,2], boxesr[0,3]),
-                                                self.FACE_MARKER_COLOR,
-                                                self.FACE_MARKER_THICKNESS)
-                
-                self.imgDisplayR = cv.circle(self.imgDisplayR,faceCenterR,
-                                             10, self.FACE_MARKER_COLOR,
-                                             self.FACE_MARKER_THICKNESS)
-                self.imgDisplayR = cv.circle(self.imgDisplayR,faceCenterR,
-                                             1,
-                                             self.FACE_MARKER_COLOR,
-                                             self.FACE_MARKER_THICKNESS)
-                
-            # If a face is found in both images
+            # Only attempt further steps if camera calibration parameters have
+            # been provided.
             if camCalibration is not None:
+              # Check that detections have been triggered in the left and right 
+              # image 
               if numFacesL and numFacesR:
-                
                 # Compute number of faces seen in both frames
                 # TODO these do not necessarily have to match. Something to be 
                 # added to sort that out
@@ -392,14 +362,16 @@ class StereoCamera:
                   numFaces = numFacesL
                   
                 for faceId in range(numFaces):
-                  self.stereoFacesList.append(StereoFace(faceId, faceCenterL, faceCenterR, 0))
+                  self.stereoFacesList.append(StereoFace(faceId,
+                                                         faceListL[faceId].center_px,
+                                                         faceListR[faceId].center_px, 0,0))
                   
                 p1 = np.zeros((3,1), np.float32)
                 p2 = np.zeros((3,1), np.float32)
-                v1 = img.getFeatureDirectionVector(faceCenterL,
+                v1 = img.getFeatureDirectionVector(faceListL[faceId].center_px,
                                                    np.asarray(camCalibration['K1']))
                 
-                v2 = img.getFeatureDirectionVector((faceCenterR[0],faceCenterL[1]),
+                v2 = img.getFeatureDirectionVector((faceListR[0].center_px[0],faceListL[0].center_px[1]),
                                                    np.asarray(camCalibration['K2']))
                 
                 # TODO: Stereo baseline currently not written to calibration files
@@ -411,9 +383,9 @@ class StereoCamera:
                 p2[0] = 0.11807402364993869
                 
                 facePos_cam_m, faceDist_m = img.triangulateStereoFeature(p1=p1,
-                                                              v1=v1,
-                                                              p2=p2,
-                                                              v2=v2)
+                                                                         v1=v1,
+                                                                         p2=p2,
+                                                                         v2=v2)
                 
                 # Post-process position vector for displaying
                 facePos_cam_m = np.asarray(facePos_cam_m)
@@ -459,8 +431,30 @@ class StereoCamera:
               
             # Compile output image 
             self.imgToShow = cv.hconcat([self.imgDisplayL, self.imgDisplayR])
+          elif self.set_mode == self.SHOW_MODE_CAPTURE_TEMPLATE:
+            # Crop images to maximum resolution squared images
+            self.imgl = self.imgl[:,cnst.IMG_OUT_CROP_X_PX:(cnst.C270_NATIVE_RESOLUTION_Y_PX 
+                                                            + cnst.IMG_OUT_CROP_X_PX )]
+            
+            # Resize image to output resolution
+            self.imgl = cv.resize(self.imgl, (cnst.IMG_OUT_RESOLUTION_XY_PX,
+                                              cnst.IMG_OUT_RESOLUTION_XY_PX))
+            
+            # Perfom face recoginition on left and right image separately
+            (numFacesL,
+             faceListL,
+             self.imgDisplayL) = self.faceDetectorL.detect(self.imgl)
+            
+            if numFacesL == 0:
+              self.log.pLogWrn('No faces detected in frame.')
+            elif numFacesL > 1:
+              self.log.pLogWrn('More than one person found in frame. Template capture is disabled.')
+            else:
+              self.currentFaceTemplateCapture = faceListL[0].img
+            
+            self.imgToShow = self.imgDisplayL
           else:
-            self.log.pLogMsg("[ERR] Error self.set_mode not valid. Exiting")
+            self.log.pLogMsg(f"[ERR] Error Mode not valid ({self.set_mode}) not valid. Exiting")
             break
 
           # Show image pair 
@@ -497,6 +491,23 @@ class StereoCamera:
           self.log.pLogMsg(f'Save image to file: {img_file_path}')
           self.log.pLogMsg(f'Image dimensions: {(self.imgToShow).shape}')
           cv.imwrite(img_file_path, self.imgToShow) 
+          img_index += 1 
+          self.saved_img_counter += 1
+          self.is_img_saved = True
+        elif (key == ord('f') 
+              and self.set_mode == self.SHOW_MODE_CAPTURE_TEMPLATE):
+          # [c] -> Save image to file
+          if not isFolderSetup:
+            # Create time tagged folder to save image pairs to
+            os.mkdir(self.path)
+            isFolderSetup = True
+          # Define image name 
+          img_name = f'{self.FACE_TEMPLATE_PREFIX}{img_index}.png'
+          # Define complete image save path 
+          img_file_path = os.path.join(self.path,img_name)
+          self.log.pLogMsg(f'Save image to file: {img_file_path}')
+          self.log.pLogMsg(f'Image dimensions: {(self.currentFaceTemplateCapture).shape}')
+          cv.imwrite(img_file_path, self.currentFaceTemplateCapture) 
           img_index += 1 
           self.saved_img_counter += 1
           self.is_img_saved = True
