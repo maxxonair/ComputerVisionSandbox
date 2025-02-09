@@ -1,26 +1,15 @@
 #!/usr/bin/env python3
-# -----------------------------------------------------------------------------
-#               >> Camera calibration 
-# -----------------------------------------------------------------------------
-# 
-# From:
-# https://docs.opencv.org/3.4/dc/dbb/tutorial_py_calibration.html
-# 
-# Setup:
-# 
-# So to find pattern in chess board, we can use the function, 
-# cv.findChessboardCorners(). We also need to pass what kind of pattern we are 
-# looking for, like 8x8 grid, 5x5 grid etc. In this example, we use 7x6 grid. 
-# (Normally a chess board has 8x8 squares and 7x7 internal corners). It 
-# returns the corner points and retval which will be True if pattern is 
-# obtained. These corners will be placed in an order (from left-to-right, 
-# top-to-bottom)
-# 
-# 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------
+#                      >> Camera calibration <<
+# -------------------------------------------------------------------------
+#
+#   Function to support mono and stereo camera calibration
+#
+# -------------------------------------------------------------------------
 import os
 import datetime
-import math
+import argparse
+from pathlib import Path
 
 from util.supportFunctions import cleanFolder
 from util.PyLog import PyLog
@@ -30,219 +19,246 @@ from util.StereoCalibrator import StereoCalibrator
 import camera_calibration_targets.chessboard.chessboard_a3 as chessboard
 import camera_calibration_targets.asymmetric_circles.acircles_a3 as acircles
 
-def main():
-    # -----------------------------------------------------------------------------
-    #               >> Folder Setup
-    # -----------------------------------------------------------------------------
-    camera_ID    = "01"
-    # Mono test set 
-    # raw_img_path = "./_camera_01_calibration/2022_44_28_Aug_08_1661683472_frame_capture/"
-    # Stereo set 
-    # raw_img_path = "./_camera_01_02_stereo_calibration_24_01_2023/_raw_imgs/2023_26_22_Jan_01_1674419201_frame_capture"
-    raw_img_path = '/Users/mrx/Documents/003_Tools/42_ImageProcessing/07_CameraCalibration/camera_calibrations/2024_04_01_15_22_19_frame_capture'
 
-    # >> Setup folder structure 
-    # Setup folder to save images to 
-    dateTimeStr = datetime.datetime.now().strftime("%Y_%m_%d__%H_%M_%S")
-    folder_name = dateTimeStr+"_camera_"+str(camera_ID)+"_calibration"
-    # start time counter 
-    path = "./02_camera_calibration_results/" + folder_name
-    os.mkdir(path)
+def main(mode: str,
+         img_path: Path,
+         calib_board: str,
+         enable_remapping: bool = True,
+         save_corner_detect_debug: bool = True,
+         enable_scaling: bool = False,
+         use_blob_detector: bool = False,
+         crop_rect_imgs: bool = False):
+  """
 
-    # Set file paths: 
-    parameterFilePath   = os.path.join(path , "03_camera_parameters/")
-    processedImagePath  = os.path.join(path , "02_processed_calibration_images/")
-    inputFilePath       = os.path.join(raw_img_path) # path + "/01_calibration_images/"
-    scaledImgPath       = os.path.join(path , "06_scaled_images/")
-    sRecifiedImgPath    = os.path.join(path , '05_corrected_images/')
-    sDisparityMapsPath  = os.path.join(path , '07_disparity_map/')
 
-    os.mkdir(parameterFilePath)
-    os.mkdir(processedImagePath)
-    os.mkdir(scaledImgPath)
-    os.mkdir(sRecifiedImgPath)
-    os.mkdir(sDisparityMapsPath)
-    # -----------------------------------------------------------------------------
-    #               >> Settings
-    # -----------------------------------------------------------------------------
-    # Save images with identified corners drawn 
-    savePlot                 = True
-    # Save scaled images 
-    enableSaveScaledImgs     = False
-    # Enable input image scaling (scale factor below)
-    enableScaling            = False
-    # Calibration mode 
-    # mono   -> monocular calibration on single camera image
-    # stereo -> stereo calibration on dual camera images
-    calibrationMode          = "stereo" 
-    #=================================================================
-    # Define calibration board
-    #=================================================================
-    # Define size of chessboard target.
-    # [!!!] Number of inner corners per a chessboard row and column 
-    #( patternSize = cvSize (points_per_row, points_per_colum) = 
-    #cvSize(columns,rows) ).
-    
+  """
+  # --------------------------------------------------------------------------
+  #               >> Folder Setup
+  # --------------------------------------------------------------------------
+  camera_ID = "01"
+
+  # >> Setup folder structure
+  # Setup folder to save images to
+  dateTimeStr = datetime.datetime.now().strftime("%Y_%m_%d__%H_%M_%S")
+  folder_name = dateTimeStr + "_camera_" + str(camera_ID) + "_calibration"
+  # start time counter
+  path = "02_camera_calibration_results/" + folder_name
+  os.makedirs(path)
+
+  # Set file paths:
+  parameterFilePath = os.path.join(path, "03_camera_parameters/")
+  processedImagePath = os.path.join(path, "02_processed_calibration_images/")
+  inputFilePath = os.path.join(Path(img_path).absolute().as_posix())
+  scaledImgPath = os.path.join(path, "06_scaled_images/")
+  sRecifiedImgPath = os.path.join(path, '05_corrected_images/')
+  sDisparityMapsPath = os.path.join(path, '07_disparity_map/')
+
+  os.makedirs(parameterFilePath)
+  os.makedirs(processedImagePath)
+  os.makedirs(scaledImgPath)
+  os.makedirs(sRecifiedImgPath)
+  os.makedirs(sDisparityMapsPath)
+  # =================================================================
+  # Define calibration board
+  # =================================================================
+  # Define size of chessboard target.
+
+  if calib_board == 'circles':
     aCircBoardOne = acircles.getCalibrationBoardProperties()
+  elif calib_board == 'chess':
     chessBoardOne = chessboard.getCalibrationBoardProperties()
+  else:
+    raise RuntimeError(
+        f'Calibration board invalid ({calib_board}). Select circles or chess')
 
-    # Set board dimsension in corner points per column and row
-    # E.g. the following chessboard, boardSize = (5,6)
-    # --->
-    # | [x][ ][x][ ][x][ ][x]
-    # | [ ][x][ ][x][ ][x][ ]
-    # | [x][ ][x][ ][x][ ][x]
-    # | [ ][x][ ][x][ ][x][ ]
-    # | [x][ ][x][ ][x][ ][x]
-    # | [ ][x][ ][x][ ][x][ ]
-    # |
-    # v
+  # Set board dimsension in corner points per column and row
+  # E.g. the following chessboard, boardSize = (5,6)
+  # --->
+  # | [x][ ][x][ ][x][ ][x]
+  # | [ ][x][ ][x][ ][x][ ]
+  # | [x][ ][x][ ][x][ ][x]
+  # | [ ][x][ ][x][ ][x][ ]
+  # | [x][ ][x][ ][x][ ][x]
+  # | [ ][x][ ][x][ ][x][ ]
+  # |
+  # v
 
-    boardSize                =  chessBoardOne["boardSize"]
+  boardSize = chessBoardOne["boardSize"]
 
-    # Physical distance between pattern feature points [m]
-    # > chessboard     -> horizontal/vertical spacing between corners
-    # > assym. circles -> diagonal spacing between dots
-    phys_corner_dist         =  chessBoardOne["cornerDist_m"]
-    
-    # Set pattern type: 
-    # Options: chessboard, acircles
-    sPatternType             = chessBoardOne["PatternType"]
-    # -----------------------------------------------------------------------------
-    #   >> Setup Logger
-    # -----------------------------------------------------------------------------
-    # Flag: Enable console prints 
-    flagIsConsolePrint       = True 
-    # Flag: Create and save logging text file
-    flagIsSaveLogFile        = True 
-    log                      = PyLog(path, 
-                                     "CalibrationLog", 
-                                     flagIsConsolePrint, 
-                                     flagIsSaveLogFile)
-    # -----------------------------------------------------------------------------
-    # Empty folder for processed images 
-    cleanFolder(processedImagePath)
-    # Empty folder for calibration parameters:
-    cleanFolder(parameterFilePath)
-    # Empty folder for rectified images:
-    cleanFolder(sRecifiedImgPath)
-    # Empty folder for scaled images:
-    cleanFolder(scaledImgPath)
-    #------------------------------------------------------------------------------
-    # >> Calibrate [MONOCULAR]
-    #------------------------------------------------------------------------------
-    if calibrationMode == "mono":
-        # Initialize calibration
-        calibrator = MonoCalibrator(inputFilePath, 
-                                    processedImagePath,
-                                    scaledImgPath,
-                                    parameterFilePath,
-                                    sRecifiedImgPath,
-                                    boardSize,
-                                    phys_corner_dist,
-                                    sPatternType,
-                                    log)
+  # Physical distance between pattern feature points [m]
+  # > chessboard     -> horizontal/vertical spacing between corners
+  # > assym. circles -> diagonal spacing between dots
+  phys_corner_dist = chessBoardOne["cornerDist_m"]
 
-        # Settings flags:
-        calibrator.setEnableImgScaling(enableScaling)
-        calibrator.setEnableMarkedImages(True)
-        calibrator.setEnableSaveScaledImages(enableSaveScaledImgs)
-        calibrator.setEnableRemapping(True)
-        calibrator.setCropRectifiedImages(True)
+  # Set pattern type:
+  # Options: chessboard, acircles
+  sPatternType = chessBoardOne["PatternType"]
+  # -----------------------------------------------------------------------
+  #   >> Setup Logger
+  # -----------------------------------------------------------------------
+  # Flag: Enable console prints
+  flagIsConsolePrint = True
+  # Flag: Create and save logging text file
+  flagIsSaveLogFile = True
+  log = PyLog(path,
+              "CalibrationLog",
+              flagIsConsolePrint,
+              flagIsSaveLogFile)
+  
+  # -----------------------------------------------------------------------
+  # Empty folder for processed images
+  cleanFolder(processedImagePath)
+  # Empty folder for calibration parameters:
+  cleanFolder(parameterFilePath)
+  # Empty folder for rectified images:
+  cleanFolder(sRecifiedImgPath)
+  # Empty folder for scaled images:
+  cleanFolder(scaledImgPath)
+  # -----------------------------------------------------------------------
+  # >> Calibrate [MONOCULAR]
+  # -----------------------------------------------------------------------
+  if mode == "mono":
+    # Initialize calibration
+    calibrator = MonoCalibrator(inputFilePath,
+                                processedImagePath,
+                                scaledImgPath,
+                                parameterFilePath,
+                                sRecifiedImgPath,
+                                boardSize,
+                                phys_corner_dist,
+                                sPatternType,
+                                log)
 
-        # Run [MONOCULAR CALIBRATION]
-        calibrator.calibrate()
+    # Settings flags:
+    calibrator.setEnableImgScaling(enable_scaling)
+    calibrator.setEnableSaveScaledImages(enable_scaling)
+    calibrator.setEnableMarkedImages(save_corner_detect_debug)
+    calibrator.setEnableRemapping(enable_remapping)
+    calibrator.setCropRectifiedImages(crop_rect_imgs)
 
-        # Calculate reprojection error per image
-        calibrator.showReprojectionError()
-        
-        # Maximum allowable average reprojection error per image
-        maxReprojThreshold = 0.013
-        # Counter to track number of recalibration loops
-        counter = 0
-        # Maximum recalibration attempts to get the error down
-        maxIter = 3
-        # maximum average reprojection error per image in data set 
-        maxError = 999
-        
-        while maxError > maxReprojThreshold and counter < maxIter :
-            # Sort out outliers based on average recalibration error per image
-            nrImagesDiscarded = calibrator.discardReprojectionOutliers(maxReprojThreshold)
-            
-            # If no images were discarded break the loop and stop recalibration
-            if nrImagesDiscarded == 0:
-                break
-            
-            # Recalibrate based on the revised image list 
-            calibrator.recalibrate()
-            
-            # Calculate reprojection error per image
-            calibrator.showReprojectionError()
-            
-            # Get maximum average recalibration error based on the recalibrated set
-            listReprojError = calibrator.returnAveragReprojErrPerImage()
-            maxError = max( listReprojError )
-            
-            # Update counter 
-            counter = counter + 1
+    # Run [MONOCULAR CALIBRATION]
+    calibrator.calibrate()
 
-        # Save Calibration Results:
-        calibrator.saveResults()
+    # Calculate reprojection error per image
+    calibrator.showReprojectionError()
 
-        # Produce rectified images
-        calibrator.rectify()
+    # Maximum allowable average reprojection error per image
+    maxReprojThreshold = 0.013
+    # Counter to track number of recalibration loops
+    counter = 0
+    # Maximum recalibration attempts to get the error down
+    maxIter = 3
+    # maximum average reprojection error per image in data set
+    maxError = 999
 
-    #------------------------------------------------------------------------------
-    # >> Calibrate [STEREO]
-    #------------------------------------------------------------------------------
-    if calibrationMode == "stereo":
-        # Stereo set 
-        inputFilePath = raw_img_path
-        # Initialize stereo calibration instance 
-        calibrator = StereoCalibrator(inputFilePath, 
-                                    processedImagePath,
-                                    scaledImgPath,
-                                    parameterFilePath,
-                                    sRecifiedImgPath,
-                                    sDisparityMapsPath,
-                                    boardSize,
-                                    phys_corner_dist,
-                                    sPatternType,
-                                    log)
+    while maxError > maxReprojThreshold and counter < maxIter:
+      # Sort out outliers based on average recalibration error per image
+      nrImagesDiscarded = calibrator.discardReprojectionOutliers(
+          maxReprojThreshold)
 
-        # Settings flags:
+      # If no images were discarded break the loop and stop recalibration
+      if nrImagesDiscarded == 0:
+        break
 
-        calibrator.setEnableImgScaling(False)
-        # Enalbe saving raw images with corner points drawn onto them
-        calibrator.setEnableMarkedImages(True)
-        #
-        calibrator.setEnableSaveScaledImages(False)
-        # This setting does not work with rectifyCalibImages 
-        # -> (concat differently sized images ...)
-        calibrator.setCropRectifiedImages(False)
-        # Blob detector is only relevant when calibration with a circle pattern board
-        # Using blob detector on top of pattern recognition improves the yield
-        calibrator.setEnableUseBlobDetector(True)
-        
-        # Run >> read stereo pairs + [MONOCULAR CALIBRATION]
-        calibrator.readStereoPairs()
+      # Recalibrate based on the revised image list
+      calibrator.recalibrate()
 
-        # [CALIBRATE stereo cameras]
-        calibrator.stereoCalibrate()
-        
-        # Rectify calibration image set and create disparity maps ()
-        calibrator.rectifyCalibImages()
+      # Calculate reprojection error per image
+      calibrator.showReprojectionError()
 
-        # Attempt to discard 2 sigma outliers
-        calibrator.discardReprojectionOutliers()
-        calibrator.recalibrate()
-        
-        # Draw re-projected image points on rectified images to check calibration
-        # calibrator.drawReprojectedCornerPoints()
+      # Get maximum average recalibration error based on the recalibrated set
+      listReprojError = calibrator.returnAveragReprojErrPerImage()
+      maxError = max(listReprojError)
 
-    #------------------------------------------------------------------------------ 
-    log.close()
-    #------------------------------------------------------------------------------ 
-    
-if "__name__"==main():
-    main()
+      # Update counter
+      counter = counter + 1
+
+    # Save Calibration Results:
+    calibrator.saveResults()
+
+    # Produce rectified images
+    calibrator.rectify()
+
+  # -----------------------------------------------------------------------
+  # >> Calibrate [STEREO]
+  # -----------------------------------------------------------------------
+  if mode == "stereo":
+    # Initialize stereo calibration instance
+    calibrator = StereoCalibrator(inputFilePath,
+                                  processedImagePath,
+                                  scaledImgPath,
+                                  parameterFilePath,
+                                  sRecifiedImgPath,
+                                  sDisparityMapsPath,
+                                  boardSize,
+                                  phys_corner_dist,
+                                  sPatternType,
+                                  log)
+
+    # ----- SETTING FLAGS -----
+    calibrator.setEnableImgScaling(enable_scaling)
+    # Enable saving raw images with corner points drawn onto them
+    calibrator.setEnableMarkedImages(save_corner_detect_debug)
+    #
+    calibrator.setEnableSaveScaledImages(enable_scaling)
+    # This setting does not work with rectifyCalibImages
+    # -> (concat differently sized images ...)
+    calibrator.setCropRectifiedImages(crop_rect_imgs)
+    # Blob detector is only relevant when calibration with a circle pattern board
+    # Using blob detector on top of pattern recognition improves the yield
+    calibrator.setEnableUseBlobDetector(use_blob_detector)
+
+    # Run >> read stereo pairs + [MONOCULAR CALIBRATION]
+    calibrator.readStereoPairs()
+
+    # [CALIBRATE stereo cameras]
+    calibrator.stereoCalibrate()
+
+    # Rectify calibration image set and create disparity maps ()
+    calibrator.rectifyCalibImages()
+
+    # Attempt to discard 2 sigma outliers
+    calibrator.discardReprojectionOutliers()
+    calibrator.recalibrate()
+
+    # Draw re-projected image points on rectified images to check calibration
+    # calibrator.drawReprojectedCornerPoints()
+
+  # -----------------------------------------------------------------------
+  log.close()
+  # -----------------------------------------------------------------------
+
+
+if __name__ == '__main__':
+
+  parser = argparse.ArgumentParser(
+      prog='[CameraCalibration]',
+      description='Camera calibration software supporting mono as well as stereo camera calibration')
+
+  parser.add_argument('-m',
+                      '--mode',
+                      required=True,
+                      help="Calibration mode: select mono or stereo")
+  parser.add_argument('-b',
+                      '--board',
+                      required=True,
+                      help="Select calibration board: chess or cicles")
+  parser.add_argument('-p',
+                      '--path',
+                      required=True,
+                      help="Path to the calibration image directory")
+
+  args = parser.parse_args()
+
+  img_path = Path(args.path)
+  if not img_path.exists():
+    raise RuntimeError(f"Input image directory not found: {img_path}")
+
+  if not (args.mode == 'mono' or args.mode == 'stereo'):
+    raise RuntimeError('Calibration mode invalid. Select mono or stereo')
+
+  if not (args.board == 'chess' or args.board == 'circles'):
+    raise RuntimeError(
+        'Calibration board setting invalid. Select chess or circles')
+
+  main(args.mode, img_path, args.board)

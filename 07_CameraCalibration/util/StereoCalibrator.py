@@ -5,7 +5,6 @@ Created on Sat Mar  5 20:43:57 2022
 
 @author: x
 """
-from tkinter import W
 import cv2 as cv
 from tqdm import tqdm
 import glob

@@ -3,7 +3,6 @@ import glob
 import os
 from tqdm import tqdm
 import cv2 as cv
-import matplotlib as plt
 
 def downsampleImage(image, reductionFactor):
 	for i in range(0,reductionFactor):
